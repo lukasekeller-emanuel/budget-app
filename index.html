@@ -1650,7 +1650,7 @@
       toggleBtn.type = "button";
       toggleBtn.className = "category-tag-toggle";
       toggleBtn.textContent = "▶";
-      toggleBtn.setAttribute("aria-label", "Tag-Aufschlüsselung anzeigen");
+      toggleBtn.setAttribute("aria-label", "Aufschlüsselung anzeigen");
       tdName.appendChild(toggleBtn);
     }
     tdName.appendChild(document.createTextNode(label));
@@ -1667,7 +1667,13 @@
     tr.appendChild(tdSum);
 
     const tdAvg = document.createElement("td");
-    const avgPerMonth = monthsCovered > 0 ? sum / monthsCovered : null;
+    // Bei weniger als einer Buchung pro Monat im Schnitt (count < monthsCovered) ist
+    // "Ø pro Monat" ohnehin praktisch identisch mit "Ø pro Buchung" und suggeriert eine
+    // Regelmässigkeit, die nicht besteht — dann "–" statt einer Zahl. Zeilen ohne eigene
+    // Buchungsanzahl (count === null, z.B. "Netto Sparen") sind von dieser Schwelle
+    // ausgenommen, da es dort keine "Anzahl Buchungen" gibt, auf die sie sich beziehen könnte.
+    const meetsFrequencyThreshold = count === null || count >= monthsCovered;
+    const avgPerMonth = (monthsCovered > 0 && meetsFrequencyThreshold) ? sum / monthsCovered : null;
     tdAvg.className = "num" + (avgPerMonth === null ? "" : avgPerMonth < 0 ? " negative" : " positive");
     tdAvg.textContent = avgPerMonth === null ? "–" : formatChf(avgPerMonth);
     tr.appendChild(tdAvg);
@@ -1737,9 +1743,13 @@
     categoryTableBody.innerHTML = "";
     let any = false;
 
-    for (const key of CATEGORIES) {
-      const bucket = categoryTotals.get(key);
-      if (!bucket || bucket.count === 0) continue;
+    // Absteigend nach Betragsgrösse (Absolutwert), grösster Posten oben — keine
+    // Sonderposition für einzelne Kategorien (z.B. "Einkommen"), rein wertbasiert.
+    const sachkategorieRows = CATEGORIES
+      .map(key => [key, categoryTotals.get(key)])
+      .filter(([, bucket]) => bucket && bucket.count > 0);
+    sachkategorieRows.sort((a, b) => Math.abs(b[1].sum) - Math.abs(a[1].sum));
+    for (const [key, bucket] of sachkategorieRows) {
       any = true;
       appendCategoryRow(key, bucket.count, bucket.sum, monthsCovered);
     }
@@ -1765,6 +1775,19 @@
       const einzahlungBetrag = einzahlungBucket ? Math.abs(einzahlungBucket.sum) : 0;
       const bezugBetrag = bezugBucket ? Math.abs(bezugBucket.sum) : 0;
       appendCategoryRow("Netto Sparen", null, einzahlungBetrag - bezugBetrag, monthsCovered);
+
+      // "Vorsorge & Anlagen" wird bei den Gesamtsummen bewusst ausgeschlossen (siehe
+      // EXCLUDED_FROM_TOTALS_CATEGORIES/isExcludedFromTotals) — das Geld ist nicht konsumiert,
+      // sondern nur umgeschichtet, wirtschaftlich identisch zu einer Spareinzahlung. "Netto
+      // Vermögensaufbau" erweitert "Netto Sparen" daher um den Vorsorge-Betrag.
+      const vorsorgeBucket = categoryTotals.get("Vorsorge & Anlagen");
+      const vorsorgeBetrag = vorsorgeBucket ? Math.abs(vorsorgeBucket.sum) : 0;
+      const nettoVermoegensaufbau = einzahlungBetrag - bezugBetrag + vorsorgeBetrag;
+      appendCategoryRow("Netto Vermögensaufbau", null, nettoVermoegensaufbau, monthsCovered, [
+        ["Transfer: Haushalt → Sparkonto", einzahlungBetrag],
+        ["Transfer: Sparkonto → Haushalt", -bezugBetrag],
+        ["Vorsorge & Anlagen", vorsorgeBetrag]
+      ]);
     }
 
     const uncategorizedBucket = categoryTotals.get("Nicht kategorisiert");
