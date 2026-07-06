@@ -1,0 +1,2042 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Budget">
+<meta name="theme-color" content="#0f172a">
+<title>Haushaltsbudget-Tracker</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --accent: #38bdf8;
+    --income: #4ade80;
+    --expense: #f87171;
+    --transfer-bg-light: #4338ca33;
+    --error-bg: #7f1d1d;
+    --error-border: #b91c1c;
+    --error-text: #fecaca;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 2rem;
+  }
+  header {
+    padding: 1.25rem 1rem 0.75rem;
+  }
+  .header-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  header h1 {
+    font-size: 1.3rem;
+    margin: 0;
+    font-weight: 600;
+    text-align: center;
+  }
+  .icon-btn {
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text);
+    padding: 0.35rem;
+  }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 0.75rem;
+  }
+
+  /* Drop zone */
+  #dropzone {
+    margin: 1rem 0;
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--text-dim);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  #dropzone.dragover {
+    background: var(--surface);
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  #dropzone p { margin: 0.25rem 0; }
+  #dropzone .hint { font-size: 0.85rem; }
+  #fileInput { display: none; }
+  .btn {
+    display: inline-block;
+    background: var(--accent);
+    color: #06222f;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-secondary { background: var(--surface-2); color: var(--text); }
+
+  #fileLabel {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 0.25rem;
+  }
+
+  /* Summary */
+  #summary {
+    display: none;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+    margin: 1rem 0;
+  }
+  #summary.active { display: grid; }
+  .stat {
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--border);
+  }
+  .stat .label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .stat .value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-top: 0.15rem;
+  }
+  .stat.income .value { color: var(--income); }
+  .stat.expense .value { color: var(--expense); }
+
+  /* Categorize bar */
+  #categorizeBar {
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 0 0.75rem;
+    flex-wrap: wrap;
+  }
+  #categorizeBar.active { display: flex; }
+  #categorizeStatus {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+
+  #errorBanner {
+    display: none;
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    color: var(--error-text);
+    border-radius: 10px;
+    padding: 0.7rem 0.9rem;
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+  }
+  #errorBanner.active { display: block; }
+
+  /* Category table */
+  #categoryTableWrap {
+    display: none;
+    margin: 0 0 1.25rem;
+  }
+  #categoryTableWrap h2 {
+    font-size: 0.95rem;
+    margin: 0 0 0.5rem;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  #categoryTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  #categoryTable th {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    background: var(--surface-2);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-dim);
+  }
+  #categoryTable td {
+    padding: 0.5rem 0.6rem;
+    border-top: 1px solid var(--border);
+  }
+  #categoryTable td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .category-tag-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.65rem;
+    padding: 0 0.4rem 0 0;
+    vertical-align: middle;
+  }
+  tr.category-tag-breakdown-row td {
+    background: var(--surface-2);
+    padding: 0.5rem 0.6rem 0.6rem 1.7rem;
+  }
+  .tag-breakdown-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .tag-breakdown-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .tag-breakdown-item .negative { color: var(--expense); }
+  .tag-breakdown-item .positive { color: var(--income); }
+
+  /* Table */
+  #tableWrap {
+    display: none;
+    overflow-x: auto;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  #tableWrap.active { display: block; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    min-width: 700px;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface-2);
+    text-align: left;
+    padding: 0.6rem 0.6rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  tbody tr:nth-child(even) { background: #1a2536; }
+  tbody tr.transfer {
+    background: var(--transfer-bg-light) !important;
+  }
+  tbody td {
+    padding: 0.6rem 0.6rem;
+    vertical-align: top;
+  }
+  td.amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.amount.positive { color: var(--income); }
+  td.amount.negative { color: var(--expense); }
+  td.balance { text-align: right; white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  td.date { white-space: nowrap; }
+  td.text-cell {
+    max-width: 220px;
+    word-break: break-word;
+  }
+  td.details {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    white-space: pre-line;
+    max-width: 220px;
+  }
+  td.category-cell { white-space: nowrap; }
+  .category-source-icon {
+    display: inline-block;
+    font-size: 0.85rem;
+    margin-left: 0.3rem;
+    cursor: help;
+  }
+  .transfer-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--accent);
+    color: #06222f;
+    border-radius: 6px;
+    padding: 0.1rem 0.4rem;
+    margin-top: 0.25rem;
+  }
+  .transfer-badge.sign-warning-badge {
+    background: var(--error-border);
+    color: var(--error-text);
+    cursor: help;
+  }
+  .split-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.1rem 0.4rem;
+    margin-top: 0.25rem;
+    cursor: help;
+  }
+  .sammelbuchung-badge {
+    display: none;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.1rem 0.4rem;
+    margin-top: 0.25rem;
+    cursor: help;
+  }
+  select.category-select {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.8rem;
+    max-width: 170px;
+  }
+  td.tag-cell { white-space: nowrap; }
+  input.tag-input {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.8rem;
+    max-width: 110px;
+    width: 100%;
+  }
+  .tag-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.6rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .tag-filter-row select {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.8rem;
+  }
+
+  #emptyState {
+    text-align: center;
+    color: var(--text-dim);
+    margin-top: 2rem;
+    font-size: 0.9rem;
+  }
+
+  /* Settings modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 1rem;
+  }
+  .modal-box {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 1.25rem;
+    width: min(420px, 100%);
+    border: 1px solid var(--border);
+  }
+  .modal-box h2 {
+    margin-top: 0;
+    font-size: 1.05rem;
+  }
+  .modal-box label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.3rem;
+  }
+  .api-key-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+  #apiKeyInput {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.6rem;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .icon-btn-inline {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0 0.7rem;
+    cursor: pointer;
+    color: var(--text);
+    font-size: 1rem;
+  }
+  .hint {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin: 0.6rem 0 0;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  .saved-msg {
+    color: var(--income);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+    text-align: right;
+  }
+
+  /* Gelernte Zuordnungen */
+  .learned-section {
+    margin-top: 1.1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.9rem;
+  }
+  .learned-section h3 {
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .learned-list {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .learned-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.78rem;
+  }
+  .learned-row.learned-row-invalid {
+    border: 1px solid var(--error-border);
+  }
+  .learned-warning-icon {
+    font-size: 0.85rem;
+    cursor: help;
+  }
+  .learned-key {
+    flex: 1;
+    color: var(--text);
+    word-break: break-word;
+  }
+  .learned-cat {
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .learned-row-invalid .learned-cat {
+    color: var(--error-text);
+  }
+  #cleanupInvalidTransferMappingsBtn,
+  #cleanupGenericSparkontoTagsBtn {
+    width: 100%;
+    margin: 0.4rem 0 0.7rem;
+    font-size: 0.8rem;
+    padding: 0.5rem 0.8rem;
+  }
+  .learned-delete {
+    background: none;
+    border: none;
+    color: var(--expense);
+    cursor: pointer;
+    font-size: 0.95rem;
+    padding: 0 0.2rem;
+    line-height: 1;
+  }
+  #learnedEmptyHint { margin: 0.4rem 0 0; }
+
+  /* Mapping testen */
+  .mapping-test-input {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.6rem;
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: inherit;
+    box-sizing: border-box;
+  }
+  textarea.mapping-test-input {
+    resize: vertical;
+    margin-top: 0.4rem;
+  }
+  .mapping-test-result {
+    margin-top: 0.6rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .mapping-test-result strong { color: var(--text); }
+  .mapping-test-outcome {
+    margin-top: 0.15rem;
+    color: var(--accent);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-row">
+    <h1>Haushaltsbudget-Tracker</h1>
+    <button class="icon-btn" id="settingsBtn" type="button" aria-label="Einstellungen" title="Einstellungen">⚙️</button>
+  </div>
+</header>
+
+<main>
+  <div id="dropzone">
+    <p>📄 CSV-Datei hierher ziehen</p>
+    <p class="hint">oder Datei auswählen (Raiffeisen-Export)</p>
+    <button class="btn" id="chooseFileBtn" type="button">Datei auswählen</button>
+    <input type="file" id="fileInput" accept=".csv,text/csv">
+    <div id="fileLabel"></div>
+  </div>
+
+  <div id="summary">
+    <div class="stat">
+      <div class="label">Transaktionen</div>
+      <div class="value" id="statTotal">0</div>
+    </div>
+    <div class="stat">
+      <div class="label">Davon Transfers</div>
+      <div class="value" id="statTransfers">0</div>
+    </div>
+    <div class="stat income">
+      <div class="label">Einnahmen</div>
+      <div class="value" id="statIncome">CHF 0.00</div>
+    </div>
+    <div class="stat expense">
+      <div class="label">Ausgaben</div>
+      <div class="value" id="statExpense">CHF 0.00</div>
+    </div>
+  </div>
+
+  <div id="categorizeBar">
+    <button class="btn" id="categorizeBtn" type="button">Kategorisieren (Claude)</button>
+    <span id="categorizeStatus"></span>
+  </div>
+
+  <div id="errorBanner"></div>
+
+  <div id="categoryTableWrap">
+    <h2>Nach Kategorie</h2>
+    <p class="hint" id="categoryDateRangeLine"></p>
+    <div class="tag-filter-row">
+      <label for="tagFilterSelect">Tag-Filter</label>
+      <select id="tagFilterSelect">
+        <option value="">Alle</option>
+      </select>
+    </div>
+    <table id="categoryTable">
+      <thead>
+        <tr>
+          <th>Kategorie</th>
+          <th>Anzahl</th>
+          <th>Summe</th>
+          <th>Ø pro Monat</th>
+          <th>Ø pro Buchung</th>
+        </tr>
+      </thead>
+      <tbody id="categoryTableBody"></tbody>
+    </table>
+  </div>
+
+  <div id="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Text</th>
+          <th>Details</th>
+          <th>Kategorie</th>
+          <th>Tag</th>
+          <th>Betrag</th>
+          <th>Saldo</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <div id="emptyState">Noch keine Datei geladen.</div>
+</main>
+
+<datalist id="tagOptionsList"></datalist>
+
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal-box">
+    <h2>Einstellungen</h2>
+    <label for="apiKeyInput">Anthropic API-Key</label>
+    <div class="api-key-row">
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-...">
+      <button type="button" class="icon-btn-inline" id="toggleKeyVisibility">👁</button>
+    </div>
+    <p class="hint">Wird nur lokal in diesem Browser gespeichert (localStorage) und ausschliesslich für Anfragen an die Anthropic API verwendet — sonst nirgendwohin gesendet.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" id="closeSettingsBtn">Schliessen</button>
+      <button type="button" class="btn" id="saveSettingsBtn">Speichern</button>
+    </div>
+    <div class="saved-msg" id="settingsSaved" style="display: none;">Gespeichert ✓</div>
+
+    <div class="learned-section">
+      <h3>Mapping testen</h3>
+      <input type="text" id="mappingTestInput" class="mapping-test-input" placeholder="Transaktionstext (Haupttext) einfügen …">
+      <textarea id="mappingTestDetails" class="mapping-test-input" rows="2" placeholder="Detailzeilen (optional) — z.B. Empfängername + Adresse …"></textarea>
+      <div class="mapping-test-result" id="mappingTestResult"></div>
+    </div>
+
+    <div class="learned-section">
+      <h3>Gelernte Zuordnungen</h3>
+      <p class="hint" id="learnedCountLine"></p>
+      <button type="button" class="btn btn-secondary" id="cleanupInvalidTransferMappingsBtn" style="display: none;">Alle ungültigen Mappings löschen</button>
+      <div class="learned-list" id="learnedList"></div>
+      <p class="hint" id="learnedEmptyHint">Noch keine gelernten Zuordnungen.</p>
+    </div>
+
+    <div class="learned-section">
+      <h3>Gespeicherte Tags: Mitglieder-Sparkonto-Bereinigung</h3>
+      <p class="hint" id="genericTagCleanupHint"></p>
+      <button type="button" class="btn btn-secondary" id="cleanupGenericSparkontoTagsBtn" style="display: none;">Generische Mitglieder-Sparkonto-Tags löschen</button>
+    </div>
+  </div>
+</div>
+
+<script src="logic.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const {
+    CATEGORIES, TRANSFER_CATEGORIES, ALL_CATEGORY_OPTIONS,
+    NORMALIZED_PRIVATE_TRANSFER_NAMES,
+    containsPrivateTransferName,
+    normalizeMerchantKey, computeMerchantKeyInfo,
+    resolveInitialCategorization, resolveInitialTag,
+    validateTransferSign, detectAutoCategory,
+    findLearnedCategoryMatch, deriveTransferInfoFromCategory,
+    resolveCategoryAssignment, logFuzzyMappingMatch
+  } = BudgetLogic;
+
+  const API_KEY_STORAGE = "budgetTrackerAnthropicApiKey";
+  const LEARNED_CATEGORIES_STORAGE = "budgetTrackerLearnedCategories";
+  const TAGS_STORAGE = "budgetTrackerTags";
+  const CLAUDE_MODEL = "claude-haiku-4-5";
+  const DEFAULT_TAGS = ["Kinder", "Vorsorge", "Sparen", "Rückstellungen", "Steuern", "Miete", "Putzfrau", "Gesundheit", "Weiterbildung", "Lukas", "Monika"];
+  const TRANSIENT_HTTP_CODES = [429, 500, 502, 503, 504, 529];
+
+  // Einzige Quelle der Wahrheit dafür, welche Kategorien bei Einnahmen-/Ausgaben-Kacheln und
+  // ähnlichen Gesamt-Berechnungen NICHT mitgezählt werden — verhindert, dass diese Liste an
+  // mehreren Stellen im Code mit eigenen (potenziell veralteten) Kategorienamen-Strings
+  // dupliziert wird.
+  const EXCLUDED_FROM_TOTALS_CATEGORIES = TRANSFER_CATEGORIES.concat(["Vorsorge & Anlagen"]);
+
+  function isExcludedFromTotals(category) {
+    return EXCLUDED_FROM_TOTALS_CATEGORIES.indexOf(category) !== -1;
+  }
+
+  // Für das Aufräumen gelernter Mappings (Settings-Modal): ein gespeicherter Mapping-Key ist
+  // bereits die normalisierte (kleingeschriebene) Fassung des Originaltexts — ein Namens- (inkl.
+  // der vier Kindernamen, da NORMALIZED_PRIVATE_TRANSFER_NAMES diese bereits enthält) oder
+  // "Interactive Brokers"-Treffer lässt sich daher direkt am Key selbst prüfen, ohne den
+  // ursprünglichen Rohtext erneut vorzuhalten.
+  function isDangerousLearnedMappingKey(key) {
+    const lower = (key || "").toLowerCase();
+    if (NORMALIZED_PRIVATE_TRANSFER_NAMES.some((name) => lower.indexOf(name) !== -1)) return true;
+    if (lower.indexOf("interactive brokers") !== -1) return true;
+    return false;
+  }
+
+  // Diese beiden Fälle sollten Stufe 2-4 (Namensregel, Mitglieder-Sparkonto, sonstige
+  // Texterkennung) ohnehin nie zum Zug kommen lassen — ein gelerntes Mapping dafür ist also per
+  // Definition überflüssig und potenziell gefährlich (siehe Interactive-Brokers-Fehlerfall,
+  // der fälschlich als "Abos" gelernt wurde).
+  function isInvalidLearnedMapping(key, category) {
+    return TRANSFER_CATEGORIES.indexOf(category) !== -1 || isDangerousLearnedMappingKey(key);
+  }
+
+  let transactions = [];
+  let rowControls = []; // { select, refreshIcon }, gleiche Reihenfolge wie transactions
+  let learnedCategories = loadLearnedCategories();
+  let savedTags = loadTags();
+
+  // --- Elements ----------------------------------------------------------
+
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("fileInput");
+  const chooseFileBtn = document.getElementById("chooseFileBtn");
+  const fileLabel = document.getElementById("fileLabel");
+  const summary = document.getElementById("summary");
+  const tableWrap = document.getElementById("tableWrap");
+  const tableBody = document.getElementById("tableBody");
+  const emptyState = document.getElementById("emptyState");
+
+  const statTotal = document.getElementById("statTotal");
+  const statTransfers = document.getElementById("statTransfers");
+  const statIncome = document.getElementById("statIncome");
+  const statExpense = document.getElementById("statExpense");
+
+  const categorizeBar = document.getElementById("categorizeBar");
+  const categorizeBtn = document.getElementById("categorizeBtn");
+  const categorizeStatus = document.getElementById("categorizeStatus");
+  const errorBanner = document.getElementById("errorBanner");
+
+  const categoryTableWrap = document.getElementById("categoryTableWrap");
+  const categoryTableBody = document.getElementById("categoryTableBody");
+  const categoryDateRangeLine = document.getElementById("categoryDateRangeLine");
+  const tagFilterSelect = document.getElementById("tagFilterSelect");
+  const tagOptionsList = document.getElementById("tagOptionsList");
+
+  const settingsBtn = document.getElementById("settingsBtn");
+  const settingsModal = document.getElementById("settingsModal");
+  const apiKeyInput = document.getElementById("apiKeyInput");
+  const toggleKeyVisibility = document.getElementById("toggleKeyVisibility");
+  const closeSettingsBtn = document.getElementById("closeSettingsBtn");
+  const saveSettingsBtn = document.getElementById("saveSettingsBtn");
+  const settingsSaved = document.getElementById("settingsSaved");
+  const learnedList = document.getElementById("learnedList");
+  const learnedEmptyHint = document.getElementById("learnedEmptyHint");
+  const learnedCountLine = document.getElementById("learnedCountLine");
+  const cleanupInvalidTransferMappingsBtn = document.getElementById("cleanupInvalidTransferMappingsBtn");
+  const cleanupGenericSparkontoTagsBtn = document.getElementById("cleanupGenericSparkontoTagsBtn");
+  const genericTagCleanupHint = document.getElementById("genericTagCleanupHint");
+  const mappingTestInput = document.getElementById("mappingTestInput");
+  const mappingTestDetails = document.getElementById("mappingTestDetails");
+  const mappingTestResult = document.getElementById("mappingTestResult");
+
+  // --- Settings modal ------------------------------------------------------
+
+  function openSettings() {
+    apiKeyInput.value = localStorage.getItem(API_KEY_STORAGE) || "";
+    apiKeyInput.type = "password";
+    settingsSaved.style.display = "none";
+    mappingTestInput.value = "";
+    mappingTestDetails.value = "";
+    mappingTestResult.innerHTML = "";
+    // Frisch aus localStorage neu laden statt der In-Memory-Kopie zu vertrauen,
+    // damit die Liste auch nach externen Änderungen (z.B. anderer Tab, DevTools) stimmt.
+    learnedCategories = loadLearnedCategories();
+    logLearnedCategoriesDebugInfo();
+    renderLearnedCategoriesList();
+    savedTags = loadTags();
+    renderGenericTagCleanupSection();
+    settingsModal.style.display = "flex";
+  }
+
+  function logLearnedCategoriesDebugInfo() {
+    const raw = localStorage.getItem(LEARNED_CATEGORIES_STORAGE);
+    console.log("[learnedCategories] raw localStorage value:", raw);
+    let parsedKeys = [];
+    try {
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsedKeys = (parsed && typeof parsed === "object") ? Object.keys(parsed) : [];
+    } catch (err) {
+      console.log("[learnedCategories] JSON.parse fehlgeschlagen:", err);
+    }
+    console.log("[learnedCategories] Anzahl Einträge im localStorage:", parsedKeys.length);
+    console.log("[learnedCategories] Keys im localStorage:", parsedKeys);
+    console.log("[learnedCategories] Anzahl Einträge im In-Memory-Objekt nach Reload:", Object.keys(learnedCategories).length);
+  }
+  function closeSettings() {
+    settingsModal.style.display = "none";
+  }
+
+  settingsBtn.addEventListener("click", openSettings);
+  closeSettingsBtn.addEventListener("click", closeSettings);
+  settingsModal.addEventListener("click", (e) => {
+    if (e.target === settingsModal) closeSettings();
+  });
+  toggleKeyVisibility.addEventListener("click", () => {
+    apiKeyInput.type = apiKeyInput.type === "password" ? "text" : "password";
+  });
+  saveSettingsBtn.addEventListener("click", () => {
+    const val = apiKeyInput.value.trim();
+    if (val) localStorage.setItem(API_KEY_STORAGE, val);
+    else localStorage.removeItem(API_KEY_STORAGE);
+    settingsSaved.style.display = "block";
+  });
+
+  // --- Gelernte Kategorie-Zuordnungen ---------------------------------------
+
+  function loadLearnedCategories() {
+    try {
+      const raw = localStorage.getItem(LEARNED_CATEGORIES_STORAGE);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveLearnedCategories() {
+    localStorage.setItem(LEARNED_CATEGORIES_STORAGE, JSON.stringify(learnedCategories));
+  }
+
+  // Transfer-Kategorien werden bewusst NICHT gelernt: der Empfängername (z.B. "Monika Keller")
+  // ist zu unspezifisch und taucht bei ganz unterschiedlichen Zahlungszwecken auf — ein
+  // gelerntes Mapping würde künftige, thematisch völlig andere Buchungen falsch zuordnen.
+  function rememberCategory(mainText, details, category, isSplitPart) {
+    if (TRANSFER_CATEGORIES.indexOf(category) !== -1) return;
+    const key = normalizeMerchantKey(mainText, details, isSplitPart);
+    if (!key) return;
+    learnedCategories[key] = category;
+    saveLearnedCategories();
+    renderLearnedCategoriesList();
+  }
+
+  // --- Tags (unabhängig von Kategorien, komplett getrenntes Lernsystem) ----------
+
+  function loadTags() {
+    try {
+      const raw = localStorage.getItem(TAGS_STORAGE);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveTags() {
+    localStorage.setItem(TAGS_STORAGE, JSON.stringify(savedTags));
+  }
+
+  function rememberTag(mainText, details, tag, isSplitPart) {
+    const key = normalizeMerchantKey(mainText, details, isSplitPart);
+    if (!key) return;
+    if (tag) savedTags[key] = tag;
+    else delete savedTags[key];
+    saveTags();
+  }
+
+  // Konsistenz-Diagnose: normalizeMerchantKey() läuft immer nur auf tx.text (dem Haupttext) —
+  // bei Dauerauftrag-Splits ist tx.text für alle Sub-Transaktionen identisch (= raw.text aus
+  // trySplitTransaction), der Key ist also unabhängig vom Splitting konsistent. Diese
+  // Testfälle prüfen das beim Laden einmal und loggen das Ergebnis in die Konsole.
+  function runNormalizeMerchantKeyConsistencyTests() {
+    const cases = [
+      {
+        label: "Kartenzahlung, Buchung A",
+        text: "Einkauf Coop-1983 ZH Letzipa 02.01.2026, 11:47, Debit Mastercard-Nr. 557452xxxxxx3710"
+      },
+      {
+        label: "Gleicher Händler, andere Buchung (Datum/Uhrzeit/Kartennummer abweichend)",
+        text: "Einkauf Coop-1983 ZH Letzipa 15.03.2026, 09:12, Debit Mastercard-Nr. 998877xxxxxx1122"
+      },
+      {
+        label: "Dauerauftrag-Hauptzeile, Sub-Transaktion 1 (nach Split, geteilter Haupttext)",
+        text: "Dauerauftrag Miete Wohnung"
+      },
+      {
+        label: "Dauerauftrag-Hauptzeile, Sub-Transaktion 2 (nach Split, identischer Haupttext)",
+        text: "Dauerauftrag Miete Wohnung"
+      }
+    ];
+
+    const results = cases.map(c => ({ label: c.label, text: c.text, key: normalizeMerchantKey(c.text) }));
+
+    console.log("--- normalizeMerchantKey() Konsistenz-Test ---");
+    results.forEach(r => console.log(r.label + ":\n  \"" + r.text + "\"\n  -> \"" + r.key + "\""));
+
+    const sameMerchantConsistent = results[0].key === results[1].key;
+    const splitPartsConsistent = results[2].key === results[3].key;
+    console.log("Test 1 — gleicher Händler, unterschiedliche Buchung -> gleicher Key: " +
+      (sameMerchantConsistent ? "OK" : "FEHLER") + " (\"" + results[0].key + "\" vs \"" + results[1].key + "\")");
+    console.log("Test 2 — gesplittete Dauerauftrag-Teile, gleicher Haupttext -> gleicher Key: " +
+      (splitPartsConsistent ? "OK" : "FEHLER") + " (\"" + results[2].key + "\" vs \"" + results[3].key + "\")");
+    console.log("--- Ende Test ---");
+  }
+
+  function renderLearnedCategoriesList() {
+    learnedList.innerHTML = "";
+    const keys = Object.keys(learnedCategories).sort();
+    learnedEmptyHint.style.display = keys.length === 0 ? "block" : "none";
+    learnedCountLine.textContent = "Anzahl gespeicherter Zuordnungen: " + keys.length;
+    learnedCountLine.style.display = keys.length === 0 ? "none" : "block";
+
+    // Ungültig/gefährlich sind: (a) Einträge, deren Kategorie eine der beiden Transfer-
+    // Kategorien ist, und (b) Einträge, deren Key einen der privaten Namen oder "Interactive
+    // Brokers" enthält — Stufe 2-4 der Kategorisierung lassen solche Mappings ohnehin nie zum
+    // Zug kommen (siehe isInvalidLearnedMapping()), sie sind also überflüssig und riskant, falls
+    // sich das jemals ändert (siehe Interactive-Brokers-Fehlerfall: fälschlich als "Abos" gelernt).
+    const invalidKeys = keys.filter(key => isInvalidLearnedMapping(key, learnedCategories[key]));
+    cleanupInvalidTransferMappingsBtn.style.display = invalidKeys.length > 0 ? "block" : "none";
+    cleanupInvalidTransferMappingsBtn.textContent = "Alle ungültigen Mappings löschen (" + invalidKeys.length + ")";
+
+    for (const key of keys) {
+      const isInvalid = isInvalidLearnedMapping(key, learnedCategories[key]);
+      const row = document.createElement("div");
+      row.className = "learned-row" + (isInvalid ? " learned-row-invalid" : "");
+
+      const keySpan = document.createElement("span");
+      keySpan.className = "learned-key";
+      keySpan.textContent = key;
+      row.appendChild(keySpan);
+
+      if (isInvalid) {
+        const warnIcon = document.createElement("span");
+        warnIcon.className = "learned-warning-icon";
+        warnIcon.textContent = "⚠️";
+        warnIcon.title = "Ungültig: Transfer-Kategorien sowie Namens-/Interactive-Brokers-Treffer dürfen nicht aus gelernten Mappings kommen und werden ignoriert — bitte löschen.";
+        row.appendChild(warnIcon);
+      }
+
+      const catSpan = document.createElement("span");
+      catSpan.className = "learned-cat";
+      catSpan.textContent = learnedCategories[key];
+      row.appendChild(catSpan);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "learned-delete";
+      delBtn.textContent = "✕";
+      delBtn.setAttribute("aria-label", "Zuordnung löschen");
+      delBtn.addEventListener("click", () => {
+        delete learnedCategories[key];
+        saveLearnedCategories();
+        renderLearnedCategoriesList();
+      });
+      row.appendChild(delBtn);
+
+      learnedList.appendChild(row);
+    }
+  }
+
+  cleanupInvalidTransferMappingsBtn.addEventListener("click", () => {
+    for (const key of Object.keys(learnedCategories)) {
+      if (isInvalidLearnedMapping(key, learnedCategories[key])) {
+        delete learnedCategories[key];
+      }
+    }
+    saveLearnedCategories();
+    renderLearnedCategoriesList();
+  });
+
+  // Vor dem Fix wurde der Tag-Key für "Mitglieder Sparkonto"-Überträge aus dem (bei jedem Bezug
+  // identischen) Haupttext gebildet statt aus den Detailzeilen — solche Alt-Einträge sind jetzt
+  // nutzlos (werden von lookupSavedTag() nie mehr über den neuen, detailzeilen-basierten Key
+  // gefunden) und lassen sich hier gesammelt entfernen, analog zum Mappings-Aufräumen oben.
+  function isGenericMitgliederSparkontoTagKey(key) {
+    return (key || "").toLowerCase().indexOf("mitglieder sparkonto") !== -1;
+  }
+
+  function renderGenericTagCleanupSection() {
+    const staleKeys = Object.keys(savedTags).filter(isGenericMitgliederSparkontoTagKey);
+    if (staleKeys.length === 0) {
+      genericTagCleanupHint.textContent = "Keine generischen Mitglieder-Sparkonto-Tag-Einträge gefunden.";
+      cleanupGenericSparkontoTagsBtn.style.display = "none";
+      return;
+    }
+    genericTagCleanupHint.textContent = staleKeys.length + " gespeicherte(r) Tag(s) hängen noch am alten, " +
+      "generischen Mitglieder-Sparkonto-Key (vor dem Fix) und werden nicht mehr wiederverwendet.";
+    cleanupGenericSparkontoTagsBtn.style.display = "block";
+    cleanupGenericSparkontoTagsBtn.textContent = "Generische Mitglieder-Sparkonto-Tags löschen (" + staleKeys.length + ")";
+  }
+
+  cleanupGenericSparkontoTagsBtn.addEventListener("click", () => {
+    for (const key of Object.keys(savedTags)) {
+      if (isGenericMitgliederSparkontoTagKey(key)) {
+        delete savedTags[key];
+      }
+    }
+    saveTags();
+    renderGenericTagCleanupSection();
+  });
+
+  function buildMappingTestLine(label, value) {
+    const div = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = label + ": ";
+    div.appendChild(strong);
+    div.appendChild(document.createTextNode(value));
+    return div;
+  }
+
+  // Live-Diagnose: zeigt für einen beliebig eingegebenen Text den berechneten Mapping-Key,
+  // ein eventuell vorhandenes gelerntes Mapping und das Ergebnis der Texterkennung —
+  // ohne Claude-API-Call, rein client-seitig.
+  function updateMappingTestResult() {
+    const value = mappingTestInput.value;
+    const detailsValue = mappingTestDetails.value;
+    mappingTestResult.innerHTML = "";
+    if (!value.trim()) return;
+
+    const keyInfo = computeMerchantKeyInfo(value, detailsValue);
+    const key = keyInfo.key;
+    const isNameMatch = containsPrivateTransferName(value, detailsValue);
+    const auto = detectAutoCategory(value, detailsValue, null);
+    const match = findLearnedCategoryMatch(key, learnedCategories);
+
+    let outcome;
+    if (isNameMatch) {
+      outcome = "Würde als privater Sparkonto-Transfer erkannt (Namensregel, Stufe 2/6) — welche der beiden Transfer-Kategorien greift, hängt vom tatsächlichen Vorzeichen des Betrags ab (dieses Testfeld fragt keinen Betrag ab).";
+    } else if (auto.category) {
+      outcome = "Würde automatisch erkannt: \"" + auto.category + "\" (Texterkennung, kein Claude-Call nötig)";
+    } else if (match && match.matchType === "exact") {
+      outcome = "Würde aus gelerntem Mapping übernommen (exakter Treffer): \"" + match.category + "\"";
+    } else if (match) {
+      outcome = "Würde aus gelerntem Mapping übernommen (unscharfer Treffer über gespeicherten Key \"" + match.matchedKey + "\"): \"" + match.category + "\"";
+    } else {
+      outcome = "Kein automatisches Mapping vorhanden — würde beim Kategorisieren an Claude gesendet.";
+    }
+
+    mappingTestResult.appendChild(buildMappingTestLine("Mapping-Key", key || "(leer)"));
+    mappingTestResult.appendChild(buildMappingTestLine("Key-Quelle", keyInfo.source === "details" ? "Detailzeilen (Haupttext zu generisch)" : "Haupttext"));
+    mappingTestResult.appendChild(buildMappingTestLine("Treffer-Typ", match ? (match.matchType === "exact" ? "Exakt" : "Unscharf") : "– kein Treffer –"));
+    mappingTestResult.appendChild(buildMappingTestLine("Gefundener gespeicherter Key", match ? match.matchedKey : "–"));
+    mappingTestResult.appendChild(buildMappingTestLine("Gelerntes Mapping", match ? match.category : "– keins vorhanden –"));
+
+    const outcomeDiv = document.createElement("div");
+    outcomeDiv.className = "mapping-test-outcome";
+    outcomeDiv.textContent = outcome;
+    mappingTestResult.appendChild(outcomeDiv);
+  }
+
+  mappingTestInput.addEventListener("input", updateMappingTestResult);
+  mappingTestDetails.addEventListener("input", updateMappingTestResult);
+
+  // --- File handling -------------------------------------------------------
+
+  chooseFileBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files && fileInput.files[0]) {
+      handleFile(fileInput.files[0]);
+    }
+  });
+
+  ["dragenter", "dragover"].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove("dragover");
+    });
+  });
+  dropzone.addEventListener("drop", (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+
+  function handleFile(file) {
+    fileLabel.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const buffer = e.target.result;
+      // Raiffeisen-Export ist Windows-1252 kodiert, nicht UTF-8.
+      const decoder = new TextDecoder("windows-1252");
+      const text = decoder.decode(buffer);
+      const parsed = parseCsv(text);
+      render(parsed);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // --- CSV Parsing -----------------------------------------------------
+
+  function parseCsv(text) {
+    const lines = text.split(/\r\n|\n|\r/).filter(line => line.length > 0);
+    if (lines.length === 0) return [];
+
+    // Erste Zeile ist der Header, wird übersprungen
+    const dataLines = lines.slice(1);
+
+    const rows = dataLines.map(splitCsvLine);
+
+    const rawTransactions = [];
+    let current = null;
+
+    for (const cols of rows) {
+      const [iban, bookedAt, text_, amount, balance, valutaDate] = cols;
+      const isMainLine = iban && iban.trim() !== "";
+
+      if (isMainLine) {
+        if (current) rawTransactions.push(current);
+        current = {
+          iban: iban.trim(),
+          bookedAt: bookedAt ? bookedAt.trim() : "",
+          text: text_ ? text_.trim() : "",
+          amount: parseAmount(amount),
+          balance: parseAmount(balance),
+          valutaDate: valutaDate ? valutaDate.trim() : "",
+          detailLines: []
+        };
+      } else {
+        // Detailzeile: gehört zur aktuellen Transaktion
+        if (current && text_ && text_.trim() !== "") {
+          current.detailLines.push(text_.trim());
+        }
+      }
+    }
+    if (current) rawTransactions.push(current);
+
+    // Dauerauftrag-Hauptzeilen mit mehreren Verwendungszwecken (je eigener CHF-Betrag in den
+    // Detailzeilen) in einzelne Transaktionen aufsplitten, statt sie zu einer Summe zu verschmelzen.
+    const expandedRawTransactions = [];
+    for (const raw of rawTransactions) {
+      const splitParts = trySplitTransaction(raw);
+      if (splitParts) {
+        expandedRawTransactions.push.apply(expandedRawTransactions, splitParts);
+      } else {
+        expandedRawTransactions.push(raw);
+      }
+    }
+
+    return expandedRawTransactions.map((tx, idx) => {
+      const details = tx.detailLines.join("\n");
+      const isSplitPart = !!tx.splitFromDauerauftrag;
+      const resolved = resolveInitialCategorization(tx.text, details, tx.amount, isSplitPart, learnedCategories);
+      if (isSplitPart) {
+        // Diagnose für den Key-Kollisions-Bug: bestätigt, dass jede Sub-Transaktion einer
+        // gesplitteten Sammelzahlung/Dauerauftrag ihren eigenen, individuellen Mapping-Key
+        // bekommt (statt fälschlich alle denselben, generischen Haupttext-Key zu teilen).
+        console.log("[Split-Key-Diagnose] Sub-Transaktion:", {
+          text: tx.text,
+          details: details,
+          key: normalizeMerchantKey(tx.text, details, isSplitPart)
+        });
+      }
+      return {
+        id: idx,
+        date: tx.bookedAt,
+        text: tx.text,
+        details: details,
+        amount: tx.amount,
+        balance: tx.balance,
+        isTransfer: resolved.isTransfer,
+        transferDirection: resolved.transferDirection,
+        category: resolved.category,
+        categorySource: resolved.categorySource,
+        learnedMatchedKey: resolved.learnedMatchedKey,
+        needsManualReview: resolved.needsManualReview,
+        signMismatchSuggested: resolved.signMismatchSuggested,
+        transferSignWarning: false,
+        isSplitPart: isSplitPart,
+        tag: resolveInitialTag(tx.text, details, resolved.allowTagDerivation, isSplitPart, savedTags)
+      };
+    });
+  }
+
+  // Extrahiert den letzten "CHF X.XX"-Betrag aus einer Detailzeile (falls mehrere vorkommen).
+  function extractChfAmountFromLine(line) {
+    const matches = line.match(/CHF\s*[\d'.,]+/gi);
+    if (!matches || matches.length === 0) return null;
+    const lastMatch = matches[matches.length - 1];
+    return parseFlexibleNumber(lastMatch.replace(/^CHF\s*/i, ""));
+  }
+
+  // Splittet eine Hauptzeile mit mehreren Detailzeilen in N Einzeltransaktionen auf, wenn
+  // jede Detailzeile einen eigenen CHF-Betrag hat und deren Summe (Toleranz 0.01) zum
+  // Hauptzeilen-Betrag passt. Sonst null (bisheriges Verhalten: eine zusammengefasste Buchung).
+  function trySplitTransaction(raw) {
+    if (!raw.detailLines || raw.detailLines.length < 2) return null;
+    if (raw.amount === null) return null;
+
+    const amounts = raw.detailLines.map(extractChfAmountFromLine);
+    if (amounts.some(a => a === null)) return null;
+
+    const sum = amounts.reduce((total, a) => total + a, 0);
+    const mainAbs = Math.abs(raw.amount);
+    if (Math.abs(sum - mainAbs) > 0.01) return null;
+
+    const sign = raw.amount < 0 ? -1 : 1;
+    return raw.detailLines.map((line, i) => ({
+      bookedAt: raw.bookedAt,
+      text: raw.text,
+      amount: sign * amounts[i],
+      balance: raw.balance,
+      detailLines: [line],
+      splitFromDauerauftrag: true
+    }));
+  }
+
+  // Einfacher CSV-Zeilen-Splitter mit Semikolon-Trennzeichen und Anführungszeichen-Unterstützung
+  function splitCsvLine(line) {
+    const result = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          cur += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ";") {
+          result.push(cur);
+          cur = "";
+        } else {
+          cur += ch;
+        }
+      }
+    }
+    result.push(cur);
+    return result;
+  }
+
+  function parseAmount(raw) {
+    return parseFlexibleNumber(raw);
+  }
+
+  function parseFlexibleNumber(raw) {
+    if (!raw) return null;
+    let s = raw.trim();
+    if (s === "") return null;
+    // Tausendertrennzeichen (' oder .) entfernen, Komma als Dezimaltrennzeichen behandeln,
+    // falls vorhanden. Falls nur Punkt vorhanden ist, als Dezimalpunkt interpretieren.
+    const hasComma = s.includes(",");
+    const hasDot = s.includes(".");
+    if (hasComma) {
+      s = s.replace(/'/g, "").replace(/\./g, "").replace(",", ".");
+    } else if (hasDot) {
+      s = s.replace(/'/g, "");
+    } else {
+      s = s.replace(/'/g, "");
+    }
+    const num = parseFloat(s);
+    return isNaN(num) ? null : num;
+  }
+
+  // --- Rendering ---------------------------------------------------------
+
+  function formatChf(num) {
+    if (num === null || num === undefined || isNaN(num)) return "–";
+    return "CHF " + num.toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Quell-Icon + Mapping-Key als Tooltip, für jede Zeile, damit Lukas direkt sehen kann,
+  // ob zwei eigentlich gleiche Händler unterschiedliche Keys bekommen.
+  // Die Stufe (1-6) spiegelt die erzwungene Prioritätsreihenfolge bei der Kategoriezuweisung:
+  // manuell > Namensregel > Mitglieder-Sparkonto > sonstige Texterkennung > gelernt > Claude.
+  const CATEGORY_SOURCE_LABELS = {
+    manual: [1, "✋", "Manuell gesetzt"],
+    "name-transfer": [2, "👤", "Automatisch erkannt (privater Sparkonto-Transfer, Namensregel)"],
+    "jugendlohn-kinder": [2, "🧒", "Automatisch erkannt (Jugendlohn — reguläre Ausgabe, kein Transfer)"],
+    transfer: [3, "🔁", "Automatisch erkannt (Mitglieder-Sparkonto-Transfer)"],
+    auto: [4, "⚡", "Automatisch erkannt (Texterkennung)"],
+    learned: [5, "🧠", "Automatisch gelernt (gespeicherte Zuordnung, exakter Treffer)"],
+    "learned-fuzzy": [5, "🌫️", "Gelernt, unscharfer Treffer"],
+    claude: [6, "🤖", "Von Claude kategorisiert"]
+  };
+
+  function refreshCategorySourceIcon(icon, tx) {
+    const keyInfo = computeMerchantKeyInfo(tx.text, tx.details, tx.isSplitPart);
+    const entry = CATEGORY_SOURCE_LABELS[tx.categorySource] || [null, "🔑", "Noch nicht kategorisiert"];
+    const priority = entry[0];
+    icon.textContent = entry[1];
+    let title = (priority ? "Stufe " + priority + "/6: " : "") + entry[2] + "\nMapping-Key: \"" + keyInfo.key + "\"";
+    if (keyInfo.source === "details") {
+      title += " (aus Detailzeilen, Haupttext zu generisch)";
+    }
+    if (tx.categorySource === "learned-fuzzy" && tx.learnedMatchedKey) {
+      title += "\nGefundener gespeicherter Key: \"" + tx.learnedMatchedKey + "\"";
+    }
+    icon.title = title;
+  }
+
+  function refreshSammelbuchungBadge(badge, tx) {
+    if (!badge) return;
+    badge.style.display = (tx.category === "Kreditkarte (Sammelbuchung)") ? "inline-block" : "none";
+  }
+
+  // Zeigt entweder die normale Transfer-Richtung oder einen Warnhinweis, wenn das Vorzeichen
+  // nicht passt — sowohl für automatisch blockierte Zuweisungen (needsManualReview, category
+  // bleibt leer) als auch für eine bewusste manuelle Übersteuerung trotz Vorzeichen-Konflikt
+  // (transferSignWarning, category ist trotzdem gesetzt — hier nur Warnhinweis, keine Blockade).
+  function refreshTransferBadge(badge, tx) {
+    if (!badge) return;
+    const warning = tx.needsManualReview || tx.transferSignWarning;
+    if (!tx.isTransfer && !warning) {
+      badge.style.display = "none";
+      return;
+    }
+    badge.style.display = "inline-block";
+    if (warning) {
+      badge.classList.add("sign-warning-badge");
+      badge.textContent = "⚠️ Vorzeichen prüfen";
+      badge.title = tx.category
+        ? "Vorzeichen des Betrags passt nicht zur gewählten Kategorie \"" + tx.category + "\" — bitte prüfen."
+        : "Erkannte Richtung würde \"" + tx.signMismatchSuggested + "\" ergeben, passt aber nicht zum Vorzeichen des Betrags — bitte manuell prüfen und Kategorie wählen.";
+    } else {
+      badge.classList.remove("sign-warning-badge");
+      badge.textContent = tx.transferDirection || "Transfer";
+      badge.title = "";
+    }
+  }
+
+  function buildCategoryCell(tx, sammelbuchungBadge, transferBadge) {
+    const td = document.createElement("td");
+    td.className = "category-cell";
+
+    const select = document.createElement("select");
+    select.className = "category-select";
+
+    const placeholderOpt = document.createElement("option");
+    placeholderOpt.value = "";
+    placeholderOpt.textContent = "– nicht kategorisiert –";
+    select.appendChild(placeholderOpt);
+
+    for (const cat of ALL_CATEGORY_OPTIONS) {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      select.appendChild(opt);
+    }
+    select.value = tx.category || "";
+
+    const icon = document.createElement("span");
+    icon.className = "category-source-icon";
+    refreshCategorySourceIcon(icon, tx);
+
+    select.addEventListener("change", () => {
+      const chosen = select.value === "" ? null : select.value;
+      // Manuelle Auswahl geht bewusst NICHT über das validateTransferSign-Gate — Lukas soll
+      // eine der beiden Transfer-Kategorien trotz Vorzeichen-Konflikt wählen können (z.B. bei
+      // einer tatsächlich untypischen Buchung). Statt einer Blockade gibt es nur den Warnhinweis.
+      tx.category = chosen;
+      tx.categorySource = chosen === null ? null : "manual";
+      tx.transferSignWarning = chosen !== null && !validateTransferSign(chosen, tx.amount).valid;
+      if (chosen !== null) {
+        tx.needsManualReview = false;
+        rememberCategory(tx.text, tx.details, chosen, tx.isSplitPart);
+      }
+      refreshCategorySourceIcon(icon, tx);
+      refreshSammelbuchungBadge(sammelbuchungBadge, tx);
+      refreshTransferBadge(transferBadge, tx);
+      updateSummary();
+    });
+
+    td.appendChild(select);
+    td.appendChild(icon);
+    rowControls[tx.id] = { select: select, icon: icon, sammelbuchungBadge: sammelbuchungBadge, transferBadge: transferBadge };
+
+    return td;
+  }
+
+  function buildTagCell(tx) {
+    const td = document.createElement("td");
+    td.className = "tag-cell";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "tag-input";
+    input.setAttribute("list", "tagOptionsList");
+    input.placeholder = "–";
+    input.value = tx.tag || "";
+
+    input.addEventListener("change", () => {
+      const value = input.value.trim();
+      tx.tag = value || null;
+      input.value = tx.tag || "";
+      rememberTag(tx.text, tx.details, tx.tag, tx.isSplitPart);
+      refreshTagDatalist();
+      refreshTagFilterOptions();
+      renderCategoryTable();
+    });
+
+    td.appendChild(input);
+    return td;
+  }
+
+  // Vorschlagsliste fürs Tag-Freitextfeld: Standard-Tags plus alle bereits vergebenen Tags.
+  function refreshTagDatalist() {
+    const options = new Set(DEFAULT_TAGS);
+    Object.values(savedTags).forEach(t => { if (t) options.add(t); });
+    transactions.forEach(tx => { if (tx.tag) options.add(tx.tag); });
+
+    tagOptionsList.innerHTML = "";
+    Array.from(options).sort((a, b) => a.localeCompare(b, "de-CH")).forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = t;
+      tagOptionsList.appendChild(opt);
+    });
+  }
+
+  // Tag-Filter-Dropdown über der "Nach Kategorie"-Tabelle: nur Tags anbieten, die aktuell
+  // tatsächlich auf einer geladenen Transaktion sitzen. Bisherige Auswahl bleibt erhalten,
+  // solange der Tag noch existiert.
+  function refreshTagFilterOptions() {
+    const previousValue = tagFilterSelect.value;
+    const tags = new Set();
+    transactions.forEach(tx => { if (tx.tag) tags.add(tx.tag); });
+
+    tagFilterSelect.innerHTML = "";
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "Alle";
+    tagFilterSelect.appendChild(allOpt);
+    Array.from(tags).sort((a, b) => a.localeCompare(b, "de-CH")).forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      tagFilterSelect.appendChild(opt);
+    });
+    tagFilterSelect.value = tags.has(previousValue) ? previousValue : "";
+  }
+
+  function render(parsedTransactions) {
+    transactions = parsedTransactions;
+    rowControls = [];
+    tableBody.innerHTML = "";
+    hideError();
+    setStatus("");
+
+    for (const tx of transactions) {
+      const tr = document.createElement("tr");
+      if (tx.isTransfer) tr.classList.add("transfer");
+
+      const tdDate = document.createElement("td");
+      tdDate.className = "date";
+      tdDate.textContent = tx.date;
+      tr.appendChild(tdDate);
+
+      const tdText = document.createElement("td");
+      tdText.className = "text-cell";
+      tdText.textContent = tx.text;
+      const transferBadge = document.createElement("div");
+      transferBadge.className = "transfer-badge";
+      refreshTransferBadge(transferBadge, tx);
+      tdText.appendChild(transferBadge);
+      if (tx.isSplitPart) {
+        const splitBadge = document.createElement("div");
+        splitBadge.className = "split-badge";
+        splitBadge.textContent = "✂️ Teil von Dauerauftrag";
+        splitBadge.title = "Teil von Dauerauftrag, automatisch aufgeteilt";
+        tdText.appendChild(splitBadge);
+      }
+      const sammelbuchungBadge = document.createElement("div");
+      sammelbuchungBadge.className = "sammelbuchung-badge";
+      sammelbuchungBadge.textContent = "🧾 Sammelbuchung";
+      sammelbuchungBadge.title = "Sammelbuchung, nicht aufgeschlüsselt";
+      refreshSammelbuchungBadge(sammelbuchungBadge, tx);
+      tdText.appendChild(sammelbuchungBadge);
+      tr.appendChild(tdText);
+
+      const tdDetails = document.createElement("td");
+      tdDetails.className = "details";
+      tdDetails.textContent = tx.details;
+      tr.appendChild(tdDetails);
+
+      tr.appendChild(buildCategoryCell(tx, sammelbuchungBadge, transferBadge));
+      tr.appendChild(buildTagCell(tx));
+
+      const tdAmount = document.createElement("td");
+      tdAmount.className = "amount " + (tx.amount !== null && tx.amount < 0 ? "negative" : "positive");
+      tdAmount.textContent = formatChf(tx.amount);
+      tr.appendChild(tdAmount);
+
+      const tdBalance = document.createElement("td");
+      tdBalance.className = "balance";
+      tdBalance.textContent = formatChf(tx.balance);
+      tr.appendChild(tdBalance);
+
+      tableBody.appendChild(tr);
+    }
+
+    summary.classList.add("active");
+    tableWrap.classList.add("active");
+    categorizeBar.classList.add("active");
+    emptyState.style.display = "none";
+
+    refreshTagDatalist();
+    refreshTagFilterOptions();
+    updateSummary();
+  }
+
+  function updateSummary() {
+    let incomeSum = 0;
+    let expenseSum = 0;
+    let transferCount = 0;
+
+    console.log("[Einnahmen/Ausgaben] Von den Top-Kacheln ausgeschlossene Kategorien:", EXCLUDED_FROM_TOTALS_CATEGORIES);
+
+    for (const tx of transactions) {
+      if (tx.isTransfer) transferCount++;
+
+      if (isExcludedFromTotals(tx.category) || tx.amount === null) continue;
+      if (tx.amount >= 0) incomeSum += tx.amount;
+      else expenseSum += Math.abs(tx.amount);
+    }
+
+    // Diagnose-Logging: ALLE positiven Beträge nach Kategorie gruppiert (auch ausgeschlossene
+    // Kategorien), damit sichtbar wird, ob eine Differenz zur tatsächlichen Einnahmen-Kachel aus
+    // einer eigentlich auszuschliessenden Kategorie (z.B. "Transfer: Sparkonto → Haushalt")
+    // stammt oder aus einzelnen positiven Buchungen in anderen Kategorien (z.B. Rückerstattungen).
+    const positiveByCategory = new Map();
+    for (const tx of transactions) {
+      if (tx.amount === null || tx.amount < 0) continue;
+      const key = tx.category || "Nicht kategorisiert";
+      positiveByCategory.set(key, (positiveByCategory.get(key) || 0) + tx.amount);
+    }
+    const positiveBreakdownRows = Array.from(positiveByCategory.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, sum]) => ({
+        Kategorie: category,
+        Summe: formatChf(sum),
+        "In Kachel enthalten?": isExcludedFromTotals(category) ? "nein (ausgeschlossen)" : "ja"
+      }));
+    const totalPositive = Array.from(positiveByCategory.values()).reduce((a, b) => a + b, 0);
+    console.log("[Einnahmen-Diagnose] Positive Beträge nach Kategorie (inkl. ausgeschlossener Kategorien):");
+    console.table(positiveBreakdownRows);
+    console.log("[Einnahmen-Diagnose] Summe ALLER positiven Beträge (alle Kategorien):", formatChf(totalPositive));
+    console.log("[Einnahmen-Diagnose] Tatsächliche Einnahmen-Kachel (nach Ausschluss):", formatChf(incomeSum));
+    console.log("[Einnahmen-Diagnose] Differenz (sollte den ausgeschlossenen Kategorien entsprechen):", formatChf(totalPositive - incomeSum));
+
+    statTotal.textContent = transactions.length;
+    statTransfers.textContent = transferCount;
+    statIncome.textContent = formatChf(incomeSum);
+    statExpense.textContent = formatChf(expenseSum);
+
+    renderCategoryTable();
+  }
+
+  // Das "Bucht am"-Feld im Raiffeisen-Export kommt je nach Export-Variante entweder als
+  // "TT.MM.JJJJ" oder als ISO-Datum mit angehängter Uhrzeit ("JJJJ-MM-TT HH:MM:SS.f", z.B.
+  // "2026-01-05 00:00:00.0") — der ursprüngliche, streng auf TT.MM.JJJJ verankerte Regex
+  // (^...$) lief bei Letzterem immer ins Leere, wodurch computeDateRange() für jede
+  // Transaktion null lieferte und "Ø pro Monat" durchgehend "–" zeigte. Beide Formate werden
+  // hier erkannt, ein evtl. vorhandener Uhrzeit-Anteil wird ignoriert (nur das Datum zählt).
+  function parseTransactionDate(dateStr) {
+    const trimmed = (dateStr || "").trim();
+
+    let m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(trimmed);
+    if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+
+    m = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+    return null;
+  }
+
+  function formatSwissDate(d) {
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return dd + "." + mm + "." + d.getFullYear();
+  }
+
+  // Anzahl Kalendermonate über ALLE geladenen Transaktionen (unabhängig vom Tag-Filter) —
+  // angebrochene Monate zählen als voller Monat (z.B. 15.01. bis 20.03. = 3 Monate).
+  function computeDateRange(txList) {
+    let min = null;
+    let max = null;
+    for (const tx of txList) {
+      const d = parseTransactionDate(tx.date);
+      if (!d) continue;
+      if (!min || d < min) min = d;
+      if (!max || d > max) max = d;
+    }
+    if (!min || !max) return null;
+    const months = (max.getFullYear() - min.getFullYear()) * 12 + (max.getMonth() - min.getMonth()) + 1;
+    return { min: min, max: max, months: months };
+  }
+
+  function computeCategoryTotals(txList) {
+    const categoryTotals = new Map();
+    for (const tx of txList) {
+      const key = tx.category || "Nicht kategorisiert";
+      if (!categoryTotals.has(key)) categoryTotals.set(key, { count: 0, sum: 0 });
+      const bucket = categoryTotals.get(key);
+      bucket.count++;
+      if (tx.amount !== null) bucket.sum += tx.amount;
+    }
+    return categoryTotals;
+  }
+
+  // Summiert die Beträge einer Kategorie (aus derselben, evtl. bereits nach Tag gefilterten
+  // Transaktionsliste wie die Zeilensumme) pro Tag auf. "ohne Tag" fasst untaggte Buchungen
+  // zusammen und steht laut Vorgabe immer zuunterst; die übrigen Tags nach Betragsgrösse
+  // (Absolutwert) absteigend — bei den Transfer-Kategorien ist das Vorzeichen ohnehin für
+  // alle Zeilen gleich, ein reiner Wert-Vergleich würde daher nur verwirren.
+  function computeTagBreakdown(txList, category) {
+    const sums = new Map();
+    for (const tx of txList) {
+      if (tx.category !== category) continue;
+      const label = tx.tag || "ohne Tag";
+      sums.set(label, (sums.get(label) || 0) + (tx.amount !== null ? tx.amount : 0));
+    }
+    const entries = Array.from(sums.entries());
+    entries.sort((a, b) => {
+      if (a[0] === "ohne Tag") return 1;
+      if (b[0] === "ohne Tag") return -1;
+      return Math.abs(b[1]) - Math.abs(a[1]);
+    });
+    return entries;
+  }
+
+  function appendCategoryRow(label, count, sum, monthsCovered, tagBreakdown) {
+    const tr = document.createElement("tr");
+    const hasBreakdown = Array.isArray(tagBreakdown) && tagBreakdown.length > 0;
+
+    const tdName = document.createElement("td");
+    let toggleBtn = null;
+    if (hasBreakdown) {
+      toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "category-tag-toggle";
+      toggleBtn.textContent = "▶";
+      toggleBtn.setAttribute("aria-label", "Tag-Aufschlüsselung anzeigen");
+      tdName.appendChild(toggleBtn);
+    }
+    tdName.appendChild(document.createTextNode(label));
+    tr.appendChild(tdName);
+
+    const tdCount = document.createElement("td");
+    tdCount.className = "num";
+    tdCount.textContent = count === null ? "–" : count;
+    tr.appendChild(tdCount);
+
+    const tdSum = document.createElement("td");
+    tdSum.className = "num " + (sum < 0 ? "negative" : "positive");
+    tdSum.textContent = formatChf(sum);
+    tr.appendChild(tdSum);
+
+    const tdAvg = document.createElement("td");
+    const avgPerMonth = monthsCovered > 0 ? sum / monthsCovered : null;
+    tdAvg.className = "num" + (avgPerMonth === null ? "" : avgPerMonth < 0 ? " negative" : " positive");
+    tdAvg.textContent = avgPerMonth === null ? "–" : formatChf(avgPerMonth);
+    tr.appendChild(tdAvg);
+
+    const tdAvgPerBooking = document.createElement("td");
+    const avgPerBooking = (count !== null && count > 0) ? sum / count : null;
+    tdAvgPerBooking.className = "num" + (avgPerBooking === null ? "" : avgPerBooking < 0 ? " negative" : " positive");
+    tdAvgPerBooking.textContent = avgPerBooking === null ? "–" : formatChf(avgPerBooking);
+    tr.appendChild(tdAvgPerBooking);
+
+    categoryTableBody.appendChild(tr);
+
+    if (hasBreakdown) {
+      const detailRow = document.createElement("tr");
+      detailRow.className = "category-tag-breakdown-row";
+      detailRow.style.display = "none";
+
+      const detailTd = document.createElement("td");
+      detailTd.colSpan = 5;
+
+      const list = document.createElement("div");
+      list.className = "tag-breakdown-list";
+      for (const [tagLabel, tagSum] of tagBreakdown) {
+        const item = document.createElement("div");
+        item.className = "tag-breakdown-item";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = tagLabel;
+        const sumSpan = document.createElement("span");
+        sumSpan.className = tagSum < 0 ? "negative" : "positive";
+        sumSpan.textContent = formatChf(tagSum);
+        item.appendChild(nameSpan);
+        item.appendChild(sumSpan);
+        list.appendChild(item);
+      }
+      detailTd.appendChild(list);
+      detailRow.appendChild(detailTd);
+      categoryTableBody.appendChild(detailRow);
+
+      toggleBtn.addEventListener("click", () => {
+        const isOpen = detailRow.style.display !== "none";
+        detailRow.style.display = isOpen ? "none" : "table-row";
+        toggleBtn.textContent = isOpen ? "▶" : "▼";
+      });
+    }
+  }
+
+  function renderCategoryTable() {
+    const filterTag = tagFilterSelect.value;
+    const filteredTransactions = filterTag ? transactions.filter(tx => tx.tag === filterTag) : transactions;
+    const categoryTotals = computeCategoryTotals(filteredTransactions);
+
+    // Zeitraum/Monatsanzahl beziehen sich immer auf ALLE geladenen Transaktionen, unabhängig
+    // vom Tag-Filter — der Durchschnitt pro Monat soll bei aktivem Filter nicht plötzlich auf
+    // einen kürzeren, künstlichen Zeitraum umgerechnet werden.
+    const dateRange = computeDateRange(transactions);
+    const monthsCovered = dateRange ? dateRange.months : 0;
+    console.log("[Ø pro Monat] computeDateRange():", dateRange
+      ? { min: dateRange.min, max: dateRange.max, months: dateRange.months }
+      : null);
+    console.log("[Ø pro Monat] Erste 5 Transaktionen (Rohdatum tx.date):",
+      transactions.slice(0, 5).map(tx => ({ id: tx.id, date: tx.date, isSplitPart: tx.isSplitPart })));
+    categoryDateRangeLine.textContent = dateRange
+      ? "Zeitraum: " + formatSwissDate(dateRange.min) + " – " + formatSwissDate(dateRange.max) +
+        " (" + monthsCovered + (monthsCovered === 1 ? " Monat)" : " Monate)")
+      : "";
+
+    categoryTableBody.innerHTML = "";
+    let any = false;
+
+    for (const key of CATEGORIES) {
+      const bucket = categoryTotals.get(key);
+      if (!bucket || bucket.count === 0) continue;
+      any = true;
+      appendCategoryRow(key, bucket.count, bucket.sum, monthsCovered);
+    }
+
+    // Kategorienamen kommen aus TRANSFER_CATEGORIES statt aus erneut ausgeschriebenen
+    // String-Literalen — einzige Quelle der Wahrheit, siehe auch isExcludedFromTotals().
+    const [haushaltZuSparkontoCategory, sparkontoZuHaushaltCategory] = TRANSFER_CATEGORIES;
+    const einzahlungBucket = categoryTotals.get(haushaltZuSparkontoCategory);
+    const bezugBucket = categoryTotals.get(sparkontoZuHaushaltCategory);
+    if (einzahlungBucket) {
+      any = true;
+      appendCategoryRow(haushaltZuSparkontoCategory, einzahlungBucket.count, einzahlungBucket.sum, monthsCovered,
+        computeTagBreakdown(filteredTransactions, haushaltZuSparkontoCategory));
+    }
+    if (bezugBucket) {
+      any = true;
+      appendCategoryRow(sparkontoZuHaushaltCategory, bezugBucket.count, bezugBucket.sum, monthsCovered,
+        computeTagBreakdown(filteredTransactions, sparkontoZuHaushaltCategory));
+    }
+    if (einzahlungBucket || bezugBucket) {
+      // Nettosparquote: tatsächlich einbezahlter Betrag minus tatsächlich bezogener Betrag,
+      // unabhängig vom Vorzeichen der Buchung auf dem Haushaltskonto.
+      const einzahlungBetrag = einzahlungBucket ? Math.abs(einzahlungBucket.sum) : 0;
+      const bezugBetrag = bezugBucket ? Math.abs(bezugBucket.sum) : 0;
+      appendCategoryRow("Netto Sparen", null, einzahlungBetrag - bezugBetrag, monthsCovered);
+    }
+
+    const uncategorizedBucket = categoryTotals.get("Nicht kategorisiert");
+    if (uncategorizedBucket) {
+      any = true;
+      appendCategoryRow("Nicht kategorisiert", uncategorizedBucket.count, uncategorizedBucket.sum, monthsCovered);
+    }
+
+    if (!any) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5;
+      td.style.color = "var(--text-dim)";
+      td.textContent = filterTag ? "Keine Buchungen mit Tag \"" + filterTag + "\"." : "Keine Buchungen.";
+      tr.appendChild(td);
+      categoryTableBody.appendChild(tr);
+    }
+
+    categoryTableWrap.style.display = transactions.length > 0 ? "block" : "none";
+  }
+
+  // --- Categorization status / errors --------------------------------------
+
+  function setStatus(msg) {
+    categorizeStatus.textContent = msg || "";
+  }
+  function showError(msg) {
+    errorBanner.textContent = msg;
+    errorBanner.classList.add("active");
+  }
+  function hideError() {
+    errorBanner.classList.remove("active");
+    errorBanner.textContent = "";
+  }
+  function setCategorizeBtnDisabled(disabled) {
+    categorizeBtn.disabled = disabled;
+  }
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // --- Claude categorization ------------------------------------------------
+
+  function buildSystemPrompt() {
+    return "Du bist ein Assistent, der Banktransaktionen eines Schweizer Haushalts in feste Kategorien einordnet. " +
+      "Du erhältst eine Liste von Transaktionen mit transaktion_id, Datum, Text, Details und Betrag. " +
+      "Ordne jede Transaktion GENAU EINER der folgenden Kategorien zu: " + CATEGORIES.join(", ") + ". " +
+      "Positive Beträge mit Bezug zu Lohn, Gehalt oder Salärzahlung (z.B. ein Firmenname als Zahlungsabsender) gehören in die Kategorie 'Einkommen'. " +
+      "Säule 3a, BVG- oder Pensionskasseneinkäufe sowie Einzahlungen an Broker-Konten (z.B. Interactive Brokers) gehören in die Kategorie 'Vorsorge & Anlagen'. " +
+      "'Versicherungen' ist für Policen ausserhalb der Krankenkasse (Hausrat, Haftpflicht, Rechtsschutz z.B. Protekta, Gebäude, Auto, Leben) — Krankenkassen-Prämien (z.B. EGK, Visana) gehören weiterhin zu 'Gesundheit & Apotheke'. " +
+      "'Kreditkarte (Sammelbuchung)' ist für nicht aufgeschlüsselte Kreditkarten-Sammelbuchungen (z.B. Viseca-Abrechnungen). " +
+      "'Aus-/Weiterbildung' ist für eigene Bildungskosten (Studiengebühren, Kursmaterial, Prüfungsgebühren, Weiterbildung) — Kinderbezogenes wie Jugendlohn, Alimente oder Ausbildungszulagen der Kinder gehört weiterhin zu 'Kinder'. " +
+      "Wenn mehrere Transaktionen in dieser Anfrage identische oder sehr ähnliche Händlertexte haben, ordne ihnen IMMER dieselbe Kategorie zu — sei konsistent innerhalb dieser Antwort. " +
+      "Falls keine Kategorie eindeutig passt, verwende 'Diverses'. " +
+      "Antworte AUSSCHLIESSLICH mit einem JSON-Array, ohne jeden weiteren Text. " +
+      "Format: [{\"transaktion_id\": <Zahl>, \"kategorie\": \"<Kategoriename>\"}, ...]. " +
+      "Die Antwort MUSS mit '[' beginnen und mit ']' enden. " +
+      "Verwende KEINE Markdown-Code-Fences (keine ```), KEINE Einleitung, KEINE Erklärung.";
+  }
+
+  function buildUserPrompt(txs) {
+    const lines = txs.map(tx => {
+      const detailsPart = tx.details ? " | " + tx.details.replace(/\n/g, " ") : "";
+      return "ID " + tx.id + " | " + tx.date + " | " + tx.text + detailsPart + " | " + formatChf(tx.amount);
+    });
+    return "Kategorisiere folgende Transaktionen:\n\n" + lines.join("\n");
+  }
+
+  function extractJsonArray(text) {
+    if (!text) return null;
+    let cleaned = text.trim();
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+
+    try {
+      const direct = JSON.parse(cleaned);
+      if (Array.isArray(direct)) return direct;
+    } catch (_) { /* fällt durch zum Brace-Matching-Fallback */ }
+
+    const start = cleaned.indexOf("[");
+    const end = cleaned.lastIndexOf("]");
+    if (start !== -1 && end !== -1 && end > start) {
+      const sub = cleaned.substring(start, end + 1);
+      try {
+        const parsed = JSON.parse(sub);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (_) { /* gibt unten null zurück */ }
+    }
+    return null;
+  }
+
+  async function callClaude(apiKey, txs) {
+    const systemPrompt = buildSystemPrompt();
+    const userPrompt = buildUserPrompt(txs);
+    const maxTokens = Math.min(8192, 300 + txs.length * 60);
+
+    let response;
+    try {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        // Kein assistant-Prefill bei direkten Browser-Aufrufen — stattdessen
+        // erzwingt der System-Prompt reines JSON.
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          max_tokens: maxTokens,
+          temperature: 0,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userPrompt }]
+        })
+      });
+    } catch (networkErr) {
+      const e = new Error("Netzwerkfehler — bitte Internetverbindung prüfen.");
+      e.transient = true;
+      throw e;
+    }
+
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const errBody = await response.json();
+        detail = errBody && errBody.error && errBody.error.message ? errBody.error.message : "";
+      } catch (_) { /* keine JSON-Fehlermeldung vorhanden */ }
+      const e = new Error("API-Fehler " + response.status + (detail ? ": " + detail : ""));
+      e.transient = TRANSIENT_HTTP_CODES.indexOf(response.status) !== -1;
+      throw e;
+    }
+
+    const data = await response.json();
+    const text = data.content && data.content[0] && data.content[0].text ? data.content[0].text : "";
+    const parsed = extractJsonArray(text);
+    if (!parsed) {
+      const e = new Error("Antwort konnte nicht als JSON gelesen werden.");
+      e.transient = true;
+      throw e;
+    }
+    return parsed;
+  }
+
+  function applyCategorization(resultArray, requestedTxs) {
+    // CATEGORIES (Claude darf nur daraus wählen, siehe buildSystemPrompt) enthält keine der
+    // beiden Transfer-Kategorien — trotzdem läuft auch dieser Pfad über das zentrale
+    // Vorzeichen-Gate, damit die Garantie an einer Stelle im Code lebt statt implizit hier.
+    const allowedCategories = new Set(CATEGORIES);
+    const byId = new Map(requestedTxs.map(tx => [tx.id, tx]));
+    let appliedCount = 0;
+
+    for (const entry of resultArray) {
+      if (!entry || typeof entry.transaktion_id === "undefined") continue;
+      const tx = byId.get(Number(entry.transaktion_id));
+      if (!tx) continue;
+      const kategorie = typeof entry.kategorie === "string" ? entry.kategorie.trim() : "";
+      const candidate = allowedCategories.has(kategorie) ? kategorie : "Diverses";
+      const resolved = resolveCategoryAssignment(candidate, tx.amount);
+      tx.category = resolved.category;
+      tx.categorySource = resolved.category !== null ? "claude" : null;
+      tx.needsManualReview = resolved.needsManualReview;
+      tx.signMismatchSuggested = resolved.signMismatchSuggested;
+      if (resolved.category !== null) appliedCount++;
+    }
+    return appliedCount;
+  }
+
+  async function categorizeTransactions() {
+    // Zeilen mit Vorzeichen-Konflikt (siehe detectTransfer) werden bewusst NICHT automatisch
+    // kategorisiert (weder gelernt noch von Claude) — sie brauchen eine manuelle Entscheidung.
+    const manualReviewCount = transactions.filter(tx => tx.needsManualReview).length;
+    const manualReviewHint = manualReviewCount > 0
+      ? " " + manualReviewCount + " Transaktion(en) mit Vorzeichen-Konflikt warten auf manuelle Prüfung."
+      : "";
+    const toCategorizeAll = transactions.filter(tx => tx.category === null && !tx.needsManualReview);
+    if (toCategorizeAll.length === 0) {
+      setStatus("Alle übrigen Transaktionen sind bereits kategorisiert." + manualReviewHint);
+      return;
+    }
+
+    hideError();
+    setCategorizeBtnDisabled(true);
+
+    // Schritt 1: gelernte Zuordnungen anwenden, ohne Claude-API.
+    const stillUncategorized = [];
+    let learnedCount = 0;
+    for (const tx of toCategorizeAll) {
+      const key = normalizeMerchantKey(tx.text, tx.details, tx.isSplitPart);
+      const match = findLearnedCategoryMatch(key, learnedCategories);
+      logFuzzyMappingMatch(tx.text, tx.details, key, match);
+      // Wie in resolveInitialCategorization(): findLearnedCategoryMatch() liefert Transfer-
+      // Kategorien nie mehr zurück, die Vorzeichen-Prüfung ist zusätzliche Absicherung übers Gate.
+      if (match && ALL_CATEGORY_OPTIONS.indexOf(match.category) !== -1 &&
+          validateTransferSign(match.category, tx.amount).valid) {
+        const transferInfo = deriveTransferInfoFromCategory(match.category);
+        tx.category = match.category;
+        tx.categorySource = match.matchType === "exact" ? "learned" : "learned-fuzzy";
+        tx.learnedMatchedKey = match.matchedKey;
+        tx.isTransfer = transferInfo.isTransfer;
+        tx.transferDirection = transferInfo.transferDirection;
+        learnedCount++;
+      } else {
+        stillUncategorized.push(tx);
+      }
+    }
+    refreshRowsForTransactions(toCategorizeAll);
+    updateSummary();
+
+    if (stillUncategorized.length === 0) {
+      setStatus(learnedCount + " Transaktionen automatisch aus gelernten Zuordnungen übernommen." + manualReviewHint);
+      setCategorizeBtnDisabled(false);
+      return;
+    }
+
+    const apiKey = localStorage.getItem(API_KEY_STORAGE);
+    if (!apiKey) {
+      showError("Bitte zuerst einen Anthropic API-Key in den Einstellungen (⚙️) hinterlegen.");
+      openSettings();
+      setCategorizeBtnDisabled(false);
+      return;
+    }
+
+    const maxAttempts = 3;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      setStatus(attempt === 1
+        ? "Kategorisiere " + stillUncategorized.length + " Transaktionen …"
+        : "Erneuter Versuch (" + attempt + "/" + maxAttempts + ") …");
+
+      try {
+        const resultArray = await callClaude(apiKey, stillUncategorized);
+        const appliedCount = applyCategorization(resultArray, stillUncategorized);
+        refreshRowsForTransactions(stillUncategorized);
+        updateSummary();
+        const learnedPart = learnedCount > 0 ? learnedCount + " automatisch (gelernt), " : "";
+        setStatus(learnedPart + appliedCount + " von " + stillUncategorized.length + " von Claude kategorisiert." + manualReviewHint);
+        setCategorizeBtnDisabled(false);
+        return;
+      } catch (err) {
+        lastError = err;
+        const transient = err.transient === true;
+        if (!transient || attempt === maxAttempts) break;
+        await sleep(800 * attempt);
+      }
+    }
+
+    setStatus("");
+    const exhausted = lastError && lastError.transient === true;
+    const prefix = exhausted ? "Kategorisierung fehlgeschlagen nach " + maxAttempts + " Versuchen: " : "Kategorisierung fehlgeschlagen: ";
+    showError(prefix + (lastError ? lastError.message : "Unbekannter Fehler"));
+    setCategorizeBtnDisabled(false);
+  }
+
+  // Aktualisiert Dropdown-Wert und Quell-Icon für die betroffenen Zeilen, ohne die Tabelle neu zu bauen.
+  function refreshRowsForTransactions(txs) {
+    for (const tx of txs) {
+      const ctrl = rowControls[tx.id];
+      if (!ctrl) continue;
+      ctrl.select.value = tx.category || "";
+      refreshCategorySourceIcon(ctrl.icon, tx);
+      refreshSammelbuchungBadge(ctrl.sammelbuchungBadge, tx);
+      refreshTransferBadge(ctrl.transferBadge, tx);
+    }
+  }
+
+  categorizeBtn.addEventListener("click", categorizeTransactions);
+  tagFilterSelect.addEventListener("change", renderCategoryTable);
+
+  runNormalizeMerchantKeyConsistencyTests();
+})();
+</script>
+
+</body>
+</html>
