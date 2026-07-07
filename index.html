@@ -2104,10 +2104,19 @@
 
   // Anzahl Kalendermonate über ALLE geladenen Transaktionen (unabhängig vom Tag-Filter) —
   // angebrochene Monate zählen als voller Monat (z.B. 15.01. bis 20.03. = 3 Monate).
+  //
+  // Aus Viseca-Abrechnungen aufgeschlüsselte Einzelpositionen (tx.visecaBreakdown) bleiben hier
+  // aussen vor: ihr Datum ist das ursprüngliche EINKAUFSdatum, das deutlich vor dem eigentlichen
+  // Kontoauszug-Exportzeitraum liegen kann (z.B. ein Einkauf im November, der erst im Januar über
+  // die Sammelbuchung belastet wurde) — würden sie mitgezählt, würde der angezeigte Zeitraum
+  // künstlich verlängert und alle "Ø pro Monat"-Werte verfälscht. Der Zeitraum bezieht sich also
+  // ausschliesslich auf die tatsächlichen Bank-Kontoauszug-Buchungen; in Summen/Kategorien zählen
+  // die Viseca-Einzelpositionen weiterhin ganz normal mit (nur hier ausgeschlossen).
   function computeDateRange(txList) {
     let min = null;
     let max = null;
     for (const tx of txList) {
+      if (tx.visecaBreakdown) continue;
       const d = parseTransactionDate(tx.date);
       if (!d) continue;
       if (!min || d < min) min = d;
