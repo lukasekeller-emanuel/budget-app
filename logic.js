@@ -648,6 +648,138 @@
     return deriveKeywordTag(mainText + " " + details, isMitgliederSparkontoMainText(mainText));
   }
 
+  // --- Viseca-Kreditkartenabrechnung: Sammelbuchungs-Aufschlüsselung -----------------------
+  //
+  // Lukas' eigene Viseca-Karte trägt eine feste Referenznummer, die bei JEDER seiner
+  // "Kreditkarte (Sammelbuchung)"-Zeilen in den Detailzeilen steht. Monikas UBS-Karte hat dieses
+  // Muster nie, und Monikas Viseca-Karte (gleiche Hagenholzstrasse-Adresse wie Lukas) trägt
+  // zusätzlich einen "Bezahlt für: Monika Keller"-Zusatz — nur Variante 1 (Referenznummer UND
+  // kein "Bezahlt für") kommt für die automatische Aufschlüsselung in Frage; Variante 2/3 werden
+  // hier bewusst nie erkannt, unabhängig von Betrag/Datum-Ähnlichkeit.
+  const VISECA_LUKAS_CARD_REFERENCE = "1107568005767518";
+
+  function isLukasVisecaSammelbuchungCandidate(category, details) {
+    if (category !== "Kreditkarte (Sammelbuchung)") return false;
+    const text = details || "";
+    if (text.indexOf(VISECA_LUKAS_CARD_REFERENCE) === -1) return false;
+    if (/bezahlt\s+für/i.test(text)) return false;
+    return true;
+  }
+
+  // Die Gegenbuchung zur Sammelbuchung ("Ihre Zahlung - Danke") hat einen negativen Betrag UND
+  // keinen MerchantName — dieses Muster reicht unabhängig vom Type-Feld, um sie zuverlässig vom
+  // eigentlichen Einkauf zu unterscheiden und beim Import zu ignorieren.
+  function isVisecaPaymentRow(row) {
+    return row.amount !== null && row.amount !== undefined && row.amount < 0 &&
+      !(row.merchantName && row.merchantName.trim());
+  }
+
+  // row.type wird vom Aufrufer bereits kleingeschrieben übergeben.
+  function isVisecaPurchaseRow(row) {
+    if (isVisecaPaymentRow(row)) return false;
+    return row.type === "merchant" || row.type === "fee";
+  }
+
+  function visecaMonthKey(date) {
+    return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
+  }
+
+  // Gruppiert alle Einkaufszeilen (Type merchant/fee, ohne Zahlungs-Gegenbuchungen) nach
+  // Kalendermonat des Einkaufsdatums — die Basis für den Betrags-/Zeitraum-Abgleich mit einer
+  // Bank-Sammelbuchung.
+  function groupVisecaPurchasesByMonth(rows) {
+    const groups = new Map();
+    for (const row of rows) {
+      if (!isVisecaPurchaseRow(row) || !row.date) continue;
+      const key = visecaMonthKey(row.date);
+      if (!groups.has(key)) {
+        groups.set(key, { monthKey: key, sum: 0, rows: [], minDate: row.date, maxDate: row.date });
+      }
+      const group = groups.get(key);
+      group.sum += row.amount;
+      group.rows.push(row);
+      if (row.date < group.minDate) group.minDate = row.date;
+      if (row.date > group.maxDate) group.maxDate = row.date;
+    }
+    return Array.from(groups.values());
+  }
+
+  const VISECA_AMOUNT_TOLERANCE = 0.05;
+  const VISECA_DAY_TOLERANCE_MS = 5 * 24 * 60 * 60 * 1000;
+
+  // Zusätzliche Bestätigung für eine als Variante 1 erkannte Sammelbuchung: die Viseca-
+  // Monatssumme muss betragsmässig (Toleranz CHF 0.05) übereinstimmen, UND das Buchungsdatum der
+  // Sammelbuchung muss innerhalb von 5 Tagen um den GESAMTEN Einkaufszeitraum des Monats liegen
+  // (frühestes Einkaufsdatum − 5 Tage bis spätestes Einkaufsdatum + 5 Tage) — grosszügig genug,
+  // um sowohl frühe als auch späte Abrechnungsläufe der Bank abzudecken.
+  function findVisecaMatchForSammelbuchung(sammelbuchungDate, sammelbuchungAmount, monthlyGroups) {
+    if (!sammelbuchungDate || sammelbuchungAmount === null || sammelbuchungAmount === undefined) return null;
+    const targetSum = Math.abs(sammelbuchungAmount);
+    for (const group of monthlyGroups) {
+      if (Math.abs(group.sum - targetSum) > VISECA_AMOUNT_TOLERANCE) continue;
+      const windowStart = new Date(group.minDate.getTime() - VISECA_DAY_TOLERANCE_MS);
+      const windowEnd = new Date(group.maxDate.getTime() + VISECA_DAY_TOLERANCE_MS);
+      if (sammelbuchungDate >= windowStart && sammelbuchungDate <= windowEnd) {
+        return group;
+      }
+    }
+    return null;
+  }
+
+  // --- Viseca-Abgleich über die tatsächliche Rechnungsperiode (statt Kalendermonat) ---------
+  //
+  // Bug-Fund: die Viseca-Abrechnungsperiode läuft nicht kalendermonatlich, sondern ca. vom 23.
+  // eines Monats bis zum 22./25. des Folgemonats — eine Kalendermonat-Summe stimmt daher so gut
+  // wie nie mit dem tatsächlichen Rechnungsbetrag überein. Der Bank-Detailtext einer Sammelbuchung
+  // enthält aber das exakte Rechnungsdatum ("... RECHNUNG VOM 23.12.2025 ..."), das als
+  // verlässliches Periodenende dient — die alte Kalendermonat-Logik (groupVisecaPurchasesByMonth/
+  // findVisecaMatchForSammelbuchung) bleibt nur noch als Fallback für den Ausnahmefall, dass dieses
+  // Datum im Text fehlt.
+  function extractVisecaRechnungsdatum(details) {
+    const m = /RECHNUNG\s+VOM\s+(\d{2})\.(\d{2})\.(\d{4})/i.exec(details || "");
+    if (!m) return null;
+    return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  }
+
+  const VISECA_FALLBACK_PERIOD_DAYS = 32;
+
+  // Periodenende ist das Rechnungsdatum selbst. Periodenanfang ist das Rechnungsdatum der
+  // chronologisch vorherigen Sammelbuchung (bekannt aus deren eigenem "RECHNUNG VOM"), oder —
+  // falls keine vorherige Rechnung bekannt ist (z.B. erste geladene Sammelbuchung) — ersatzweise
+  // ein festes 32-Tage-Fenster davor.
+  function computeVisecaBillingPeriod(invoiceDate, previousInvoiceDate) {
+    const start = previousInvoiceDate
+      ? previousInvoiceDate
+      : new Date(invoiceDate.getTime() - VISECA_FALLBACK_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+    return { start: start, end: invoiceDate };
+  }
+
+  // start (Vorgänger-Rechnungsdatum bzw. Fallback-Stichtag) zählt bewusst NICHT mehr zur Periode
+  // — sonst würde ein Einkauf exakt am Vorgänger-Rechnungsdatum doppelt gezählt (einmal als Ende
+  // der vorherigen, einmal als Anfang der neuen Periode). end (das aktuelle Rechnungsdatum)
+  // zählt noch dazu.
+  function sumVisecaPurchasesInPeriod(rows, period) {
+    const matchedRows = [];
+    let sum = 0;
+    for (const row of rows) {
+      if (!isVisecaPurchaseRow(row) || !row.date) continue;
+      if (row.date <= period.start || row.date > period.end) continue;
+      sum += row.amount;
+      matchedRows.push(row);
+    }
+    return { sum: sum, rows: matchedRows };
+  }
+
+  // Verbindet computeVisecaBillingPeriod()/sumVisecaPurchasesInPeriod() mit dem Betragsabgleich
+  // (Toleranz wie beim Kalendermonat-Fallback: CHF 0.05) zu einem einzigen Aufruf pro Kandidaten.
+  function matchVisecaPeriodForSammelbuchung(sammelbuchungAmount, invoiceDate, previousInvoiceDate, purchaseRows) {
+    if (sammelbuchungAmount === null || sammelbuchungAmount === undefined || !invoiceDate) return null;
+    const period = computeVisecaBillingPeriod(invoiceDate, previousInvoiceDate);
+    const result = sumVisecaPurchasesInPeriod(purchaseRows, period);
+    if (Math.abs(result.sum - Math.abs(sammelbuchungAmount)) > VISECA_AMOUNT_TOLERANCE) return null;
+    return { period: period, sum: result.sum, rows: result.rows };
+  }
+
   return {
     CATEGORIES,
     TRANSFER_CATEGORIES,
@@ -665,6 +797,16 @@
     findLearnedCategoryMatch,
     deriveTransferInfoFromCategory,
     resolveCategoryAssignment,
-    logFuzzyMappingMatch
+    logFuzzyMappingMatch,
+    VISECA_LUKAS_CARD_REFERENCE,
+    isLukasVisecaSammelbuchungCandidate,
+    isVisecaPaymentRow,
+    isVisecaPurchaseRow,
+    groupVisecaPurchasesByMonth,
+    findVisecaMatchForSammelbuchung,
+    extractVisecaRechnungsdatum,
+    computeVisecaBillingPeriod,
+    sumVisecaPurchasesInPeriod,
+    matchVisecaPeriodForSammelbuchung
   };
 });

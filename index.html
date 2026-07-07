@@ -67,7 +67,7 @@
   }
 
   /* Drop zone */
-  #dropzone {
+  .dropzone {
     margin: 1rem 0;
     border: 2px dashed var(--border);
     border-radius: 12px;
@@ -76,14 +76,14 @@
     color: var(--text-dim);
     transition: background 0.15s, border-color 0.15s;
   }
-  #dropzone.dragover {
+  .dropzone.dragover {
     background: var(--surface);
     border-color: var(--accent);
     color: var(--text);
   }
-  #dropzone p { margin: 0.25rem 0; }
-  #dropzone .hint { font-size: 0.85rem; }
-  #fileInput { display: none; }
+  .dropzone p { margin: 0.25rem 0; }
+  .dropzone .hint { font-size: 0.85rem; }
+  #fileInput, #fileInputViseca { display: none; }
   .btn {
     display: inline-block;
     background: var(--accent);
@@ -99,11 +99,18 @@
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .btn-secondary { background: var(--surface-2); color: var(--text); }
 
-  #fileLabel {
+  .file-label {
     font-size: 0.85rem;
     color: var(--text-dim);
     text-align: center;
     margin-top: 0.25rem;
+  }
+
+  #visecaSummaryLine {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin: -0.5rem 0 0.5rem;
   }
 
   /* Summary */
@@ -303,6 +310,18 @@
     cursor: help;
   }
   .split-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.1rem 0.4rem;
+    margin-top: 0.25rem;
+    cursor: help;
+  }
+  .viseca-badge {
     display: inline-block;
     font-size: 0.7rem;
     font-weight: 600;
@@ -548,13 +567,22 @@
 </header>
 
 <main>
-  <div id="dropzone">
+  <div id="dropzone" class="dropzone">
     <p>📄 CSV-Datei hierher ziehen</p>
     <p class="hint">oder Datei auswählen (Raiffeisen-Export)</p>
     <button class="btn" id="chooseFileBtn" type="button">Datei auswählen</button>
     <input type="file" id="fileInput" accept=".csv,text/csv">
-    <div id="fileLabel"></div>
+    <div id="fileLabel" class="file-label"></div>
   </div>
+
+  <div id="dropzoneViseca" class="dropzone">
+    <p>💳 Kreditkartenabrechnung (Viseca) hierher ziehen</p>
+    <p class="hint">oder Datei auswählen (Viseca-CSV-Export) — bricht "Kreditkarte (Sammelbuchung)"-Zeilen auf</p>
+    <button class="btn btn-secondary" id="chooseFileVisecaBtn" type="button">Datei auswählen</button>
+    <input type="file" id="fileInputViseca" accept=".csv,text/csv">
+    <div id="fileLabelViseca" class="file-label"></div>
+  </div>
+  <p id="visecaSummaryLine" style="display: none;"></p>
 
   <div id="summary">
     <div class="stat">
@@ -690,7 +718,10 @@
     resolveInitialCategorization, resolveInitialTag,
     validateTransferSign, detectAutoCategory,
     findLearnedCategoryMatch, deriveTransferInfoFromCategory,
-    resolveCategoryAssignment, logFuzzyMappingMatch
+    resolveCategoryAssignment, logFuzzyMappingMatch,
+    isLukasVisecaSammelbuchungCandidate, isVisecaPurchaseRow,
+    groupVisecaPurchasesByMonth, findVisecaMatchForSammelbuchung,
+    extractVisecaRechnungsdatum, matchVisecaPeriodForSammelbuchung
   } = BudgetLogic;
 
   const API_KEY_STORAGE = "budgetTrackerAnthropicApiKey";
@@ -745,6 +776,11 @@
   const fileInput = document.getElementById("fileInput");
   const chooseFileBtn = document.getElementById("chooseFileBtn");
   const fileLabel = document.getElementById("fileLabel");
+  const dropzoneViseca = document.getElementById("dropzoneViseca");
+  const fileInputViseca = document.getElementById("fileInputViseca");
+  const chooseFileVisecaBtn = document.getElementById("chooseFileVisecaBtn");
+  const fileLabelViseca = document.getElementById("fileLabelViseca");
+  const visecaSummaryLine = document.getElementById("visecaSummaryLine");
   const summary = document.getElementById("summary");
   const tableWrap = document.getElementById("tableWrap");
   const tableBody = document.getElementById("tableBody");
@@ -1352,8 +1388,217 @@
       const text = decoder.decode(buffer);
       const parsed = parseCsv(text);
       render(parsed);
+      // Ein bisheriger Viseca-Abgleich bezog sich auf die jetzt ersetzten Transaktionen und
+      // wäre hier nur noch eine irreführende Karteileiche.
+      visecaSummaryLine.style.display = "none";
+      visecaSummaryLine.textContent = "";
     };
     reader.readAsArrayBuffer(file);
+  }
+
+  // --- Kreditkartenabrechnung (Viseca) --------------------------------------
+
+  chooseFileVisecaBtn.addEventListener("click", () => fileInputViseca.click());
+  fileInputViseca.addEventListener("change", () => {
+    if (fileInputViseca.files && fileInputViseca.files[0]) {
+      handleVisecaFile(fileInputViseca.files[0]);
+    }
+  });
+
+  ["dragenter", "dragover"].forEach(evt => {
+    dropzoneViseca.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzoneViseca.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(evt => {
+    dropzoneViseca.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzoneViseca.classList.remove("dragover");
+    });
+  });
+  dropzoneViseca.addEventListener("drop", (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) handleVisecaFile(file);
+  });
+
+  function handleVisecaFile(file) {
+    fileLabelViseca.textContent = file.name;
+    if (transactions.length === 0) {
+      showError("Bitte zuerst die Kontoauszug-CSV (Raiffeisen-Export) laden, bevor eine Kreditkartenabrechnung zugeordnet werden kann.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const buffer = e.target.result;
+      // Viseca-Export ist UTF-8 mit BOM — TextDecoder("utf-8") entfernt das BOM automatisch.
+      const decoder = new TextDecoder("utf-8");
+      const text = decoder.decode(buffer);
+      let visecaRows;
+      try {
+        visecaRows = parseVisecaCsv(text);
+      } catch (err) {
+        showError("Viseca-CSV konnte nicht gelesen werden: " + err.message);
+        return;
+      }
+      reconcileVisecaWithSammelbuchungen(visecaRows);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function parseVisecaDate(str) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((str || "").trim());
+    if (!m) return null;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+
+  const VISECA_REQUIRED_COLUMNS = ["TransactionId", "Date", "Amount", "MerchantName", "MerchantPlace", "Details", "Type"];
+
+  function parseVisecaCsv(text) {
+    const lines = text.split(/\r\n|\n|\r/).filter(line => line.length > 0);
+    if (lines.length < 1) return [];
+
+    const headerCols = splitCsvLine(lines[0], ",").map(c => c.trim());
+    const colIndex = {};
+    headerCols.forEach((name, i) => { colIndex[name] = i; });
+
+    const missing = VISECA_REQUIRED_COLUMNS.filter(name => !(name in colIndex));
+    if (missing.length > 0) {
+      throw new Error("fehlende Spalte(n): " + missing.join(", "));
+    }
+
+    return lines.slice(1).map(line => {
+      const cols = splitCsvLine(line, ",");
+      const rawDate = (cols[colIndex["Date"]] || "").trim();
+      return {
+        transactionId: (cols[colIndex["TransactionId"]] || "").trim(),
+        date: parseVisecaDate(rawDate),
+        dateRaw: rawDate,
+        amount: parseFlexibleNumber(cols[colIndex["Amount"]]),
+        merchantName: (cols[colIndex["MerchantName"]] || "").trim(),
+        merchantPlace: (cols[colIndex["MerchantPlace"]] || "").trim(),
+        details: (cols[colIndex["Details"]] || "").trim(),
+        type: (cols[colIndex["Type"]] || "").trim().toLowerCase()
+      };
+    }).filter(row => row.transactionId !== "");
+  }
+
+  // Baut aus einer einzelnen Viseca-Einkaufszeile eine reguläre Transaktion, die dieselbe
+  // Kategorisierungs-Pipeline (gelerntes Mapping, Claude) durchläuft wie eine normal aus dem
+  // Kontoauszug geparste Buchung. visecaBreakdown markiert sie für das eigene Badge in render().
+  function buildVisecaTransaction(row) {
+    const text = row.merchantName || "Viseca-Einzelposition";
+    const details = [row.merchantPlace, row.details].filter(Boolean).join("\n");
+    const amount = row.amount === null ? null : -row.amount;
+    const resolved = resolveInitialCategorization(text, details, amount, false, learnedCategories);
+    return {
+      id: null, // wird in reconcileVisecaWithSammelbuchungen() für alle Zeilen neu vergeben
+      date: row.date ? formatSwissDate(row.date) : row.dateRaw,
+      text: text,
+      details: details,
+      amount: amount,
+      balance: null,
+      isTransfer: resolved.isTransfer,
+      transferDirection: resolved.transferDirection,
+      category: resolved.category,
+      categorySource: resolved.categorySource,
+      learnedMatchedKey: resolved.learnedMatchedKey,
+      needsManualReview: resolved.needsManualReview,
+      signMismatchSuggested: resolved.signMismatchSuggested,
+      transferSignWarning: false,
+      isSplitPart: false,
+      visecaBreakdown: true,
+      tag: resolveInitialTag(text, details, resolved.allowTagDerivation, false, savedTags)
+    };
+  }
+
+  // Gleicht Lukas' Viseca-Kreditkartenabrechnung gegen die bereits geladenen Kontodaten ab: nur
+  // "Kreditkarte (Sammelbuchung)"-Zeilen aus Variante 1 (siehe isLukasVisecaSammelbuchungCandidate
+  // in logic.js) kommen in Frage. Primärer Weg: das exakte Rechnungsdatum aus "RECHNUNG VOM
+  // TT.MM.JJJJ" im Detailtext ergibt die tatsächliche Abrechnungsperiode (siehe
+  // matchVisecaPeriodForSammelbuchung in logic.js) — die Viseca-Abrechnung läuft NICHT
+  // kalendermonatlich, sondern ca. vom 23. bis zum 22./25. des Folgemonats, siehe Bug-Kommentar
+  // dort. Nur wenn dieses Datum im Text fehlt, greift ersatzweise die alte Kalendermonat-Heuristik
+  // (Ausnahmefall, nicht die Regel).
+  function reconcileVisecaWithSammelbuchungen(visecaRows) {
+    hideError();
+    const purchaseRows = visecaRows.filter(isVisecaPurchaseRow);
+
+    const totalSammelbuchungen = transactions.filter(tx => tx.category === "Kreditkarte (Sammelbuchung)").length;
+
+    const candidates = transactions.filter(tx => isLukasVisecaSammelbuchungCandidate(tx.category, tx.details));
+    const withInvoiceDate = [];
+    const withoutInvoiceDate = [];
+    for (const tx of candidates) {
+      const invoiceDate = extractVisecaRechnungsdatum(tx.details);
+      if (invoiceDate) withInvoiceDate.push({ tx: tx, invoiceDate: invoiceDate });
+      else withoutInvoiceDate.push(tx);
+    }
+    // Chronologisch sortieren, damit für jeden Kandidaten das Rechnungsdatum der jeweils
+    // VORHERIGEN Sammelbuchung als Periodenanfang zur Verfügung steht.
+    withInvoiceDate.sort((a, b) => a.invoiceDate - b.invoiceDate);
+
+    const matchedPairs = []; // { tx, rows }
+
+    let previousInvoiceDate = null;
+    for (const entry of withInvoiceDate) {
+      const match = matchVisecaPeriodForSammelbuchung(entry.tx.amount, entry.invoiceDate, previousInvoiceDate, purchaseRows);
+      if (match) matchedPairs.push({ tx: entry.tx, rows: match.rows });
+      // Das Rechnungsdatum ist ein Fakt aus dem Banktext, unabhängig davon, ob der Abgleich für
+      // DIESE Sammelbuchung erfolgreich war — die nächste reale Abrechnungsperiode beginnt in
+      // jedem Fall danach.
+      previousInvoiceDate = entry.invoiceDate;
+    }
+
+    // Fallback (Ausnahmefall): Sammelbuchungen ohne erkennbares "RECHNUNG VOM"-Datum weiterhin
+    // über die alte Kalendermonat-Heuristik abgleichen. Läuft auf denselben purchaseRows wie oben
+    // — bei einem echten Ausnahmefall ist das Risiko einer doppelten Zuordnung vernachlässigbar.
+    if (withoutInvoiceDate.length > 0) {
+      let monthlyGroups = groupVisecaPurchasesByMonth(purchaseRows);
+      for (const tx of withoutInvoiceDate) {
+        const txDate = parseTransactionDate(tx.date);
+        const match = findVisecaMatchForSammelbuchung(txDate, tx.amount, monthlyGroups);
+        if (!match) continue;
+        matchedPairs.push({ tx: tx, rows: match.rows });
+        monthlyGroups = monthlyGroups.filter(g => g !== match);
+      }
+    }
+
+    visecaSummaryLine.style.display = "block";
+
+    if (matchedPairs.length === 0) {
+      visecaSummaryLine.textContent = totalSammelbuchungen === 0
+        ? "Keine \"Kreditkarte (Sammelbuchung)\"-Zeilen in den geladenen Kontodaten gefunden."
+        : "0 von " + totalSammelbuchungen + " Kreditkarten-Sammelbuchungen aufgeschlüsselt — kein passender Abgleich gefunden.";
+      return;
+    }
+
+    const matchedTxIds = new Set(matchedPairs.map(p => p.tx.id));
+    const newTransactions = [];
+    let totalBrokenDownAmount = 0;
+
+    for (const tx of transactions) {
+      if (!matchedTxIds.has(tx.id)) {
+        newTransactions.push(tx);
+        continue;
+      }
+      const pair = matchedPairs.find(p => p.tx.id === tx.id);
+      totalBrokenDownAmount += Math.abs(tx.amount);
+      for (const row of pair.rows) {
+        newTransactions.push(buildVisecaTransaction(row));
+      }
+    }
+
+    // IDs müssen wieder eindeutige, lückenlose Indizes sein (siehe render()/rowControls).
+    newTransactions.forEach((t, idx) => { t.id = idx; });
+
+    render(newTransactions);
+
+    visecaSummaryLine.textContent = matchedPairs.length + " von " + totalSammelbuchungen +
+      " Kreditkarten-Sammelbuchungen aufgeschlüsselt (" + formatChf(totalBrokenDownAmount) +
+      "), Rest bleibt als Sammelbuchung.";
   }
 
   // --- CSV Parsing -----------------------------------------------------
@@ -1365,7 +1610,7 @@
     // Erste Zeile ist der Header, wird übersprungen
     const dataLines = lines.slice(1);
 
-    const rows = dataLines.map(splitCsvLine);
+    const rows = dataLines.map(line => splitCsvLine(line));
 
     const rawTransactions = [];
     let current = null;
@@ -1474,8 +1719,11 @@
     }));
   }
 
-  // Einfacher CSV-Zeilen-Splitter mit Semikolon-Trennzeichen und Anführungszeichen-Unterstützung
-  function splitCsvLine(line) {
+  // Einfacher CSV-Zeilen-Splitter mit konfigurierbarem Trennzeichen (Standard Semikolon, für den
+  // Raiffeisen-Export) und Anführungszeichen-Unterstützung. Der Viseca-Export nutzt Komma statt
+  // Semikolon, siehe parseVisecaCsv().
+  function splitCsvLine(line, delimiter) {
+    const sep = delimiter || ";";
     const result = [];
     let cur = "";
     let inQuotes = false;
@@ -1495,7 +1743,7 @@
       } else {
         if (ch === '"') {
           inQuotes = true;
-        } else if (ch === ";") {
+        } else if (ch === sep) {
           result.push(cur);
           cur = "";
         } else {
@@ -1736,6 +1984,13 @@
         splitBadge.textContent = "✂️ Teil von Dauerauftrag";
         splitBadge.title = "Teil von Dauerauftrag, automatisch aufgeteilt";
         tdText.appendChild(splitBadge);
+      }
+      if (tx.visecaBreakdown) {
+        const visecaBadge = document.createElement("div");
+        visecaBadge.className = "viseca-badge";
+        visecaBadge.textContent = "💳 Aus Kreditkartenabrechnung aufgeschlüsselt";
+        visecaBadge.title = "Aus Kreditkartenabrechnung aufgeschlüsselt";
+        tdText.appendChild(visecaBadge);
       }
       const sammelbuchungBadge = document.createElement("div");
       sammelbuchungBadge.className = "sammelbuchung-badge";
