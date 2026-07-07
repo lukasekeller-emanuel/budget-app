@@ -643,6 +643,18 @@
     <div class="saved-msg" id="settingsSaved" style="display: none;">Gespeichert ✓</div>
 
     <div class="learned-section">
+      <h3>Automatische Sicherung</h3>
+      <p class="hint" id="autoBackupStatusLine">Nicht eingerichtet</p>
+      <button type="button" class="btn btn-secondary" id="autoBackupSetupBtn">Automatische Sicherung einrichten</button>
+      <p class="hint" id="autoBackupUnsupportedHint" style="display: none;">Automatische Sicherung wird von deinem Browser nicht unterstützt, bitte regelmässig manuell exportieren.</p>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.6rem; flex-wrap: wrap;">
+        <button type="button" class="btn btn-secondary" id="manualBackupDownloadBtn">Sicherung jetzt herunterladen</button>
+        <button type="button" class="btn btn-secondary" id="restoreBackupBtn">Sicherung wiederherstellen</button>
+      </div>
+      <input type="file" id="restoreBackupInput" accept=".json,application/json" style="display: none;">
+    </div>
+
+    <div class="learned-section">
       <h3>Mapping testen</h3>
       <input type="text" id="mappingTestInput" class="mapping-test-input" placeholder="Transaktionstext (Haupttext) einfügen …">
       <textarea id="mappingTestDetails" class="mapping-test-input" rows="2" placeholder="Detailzeilen (optional) — z.B. Empfängername + Adresse …"></textarea>
@@ -684,6 +696,10 @@
   const API_KEY_STORAGE = "budgetTrackerAnthropicApiKey";
   const LEARNED_CATEGORIES_STORAGE = "budgetTrackerLearnedCategories";
   const TAGS_STORAGE = "budgetTrackerTags";
+  const AUTO_BACKUP_LAST_SAVED_STORAGE = "budgetTrackerAutoBackupLastSaved";
+  const AUTO_BACKUP_DB_NAME = "budgetTrackerAutoBackupDB";
+  const AUTO_BACKUP_DB_STORE = "handles";
+  const AUTO_BACKUP_HANDLE_KEY = "backupFileHandle";
   const CLAUDE_MODEL = "claude-sonnet-4-6";
   const DEFAULT_TAGS = ["Kinder", "Vorsorge", "Sparen", "Rückstellungen", "Steuern", "Miete", "Putzfrau", "Gesundheit", "Weiterbildung", "Lukas", "Monika"];
   const TRANSIENT_HTTP_CODES = [429, 500, 502, 503, 504, 529];
@@ -767,6 +783,13 @@
   const mappingTestDetails = document.getElementById("mappingTestDetails");
   const mappingTestResult = document.getElementById("mappingTestResult");
 
+  const autoBackupStatusLine = document.getElementById("autoBackupStatusLine");
+  const autoBackupSetupBtn = document.getElementById("autoBackupSetupBtn");
+  const autoBackupUnsupportedHint = document.getElementById("autoBackupUnsupportedHint");
+  const manualBackupDownloadBtn = document.getElementById("manualBackupDownloadBtn");
+  const restoreBackupBtn = document.getElementById("restoreBackupBtn");
+  const restoreBackupInput = document.getElementById("restoreBackupInput");
+
   // --- Settings modal ------------------------------------------------------
 
   function openSettings() {
@@ -783,6 +806,7 @@
     renderLearnedCategoriesList();
     savedTags = loadTags();
     renderGenericTagCleanupSection();
+    renderAutoBackupSection();
     settingsModal.style.display = "flex";
   }
 
@@ -845,6 +869,7 @@
     learnedCategories[key] = category;
     saveLearnedCategories();
     renderLearnedCategoriesList();
+    scheduleAutoBackupWrite();
   }
 
   // --- Tags (unabhängig von Kategorien, komplett getrenntes Lernsystem) ----------
@@ -869,6 +894,7 @@
     if (tag) savedTags[key] = tag;
     else delete savedTags[key];
     saveTags();
+    scheduleAutoBackupWrite();
   }
 
   // Konsistenz-Diagnose: normalizeMerchantKey() läuft immer nur auf tx.text (dem Haupttext) —
@@ -1004,6 +1030,237 @@
     saveTags();
     renderGenericTagCleanupSection();
   });
+
+  // --- Automatische Sicherung (File System Access API) ---------------------
+  //
+  // Der von showSaveFilePicker() gelieferte FileSystemFileHandle lässt sich nicht in
+  // localStorage ablegen (nicht JSON-serialisierbar), wohl aber per structured clone in
+  // IndexedDB — genau das ist der vom Spec-Team empfohlene Weg, den Handle über einen
+  // Seiten-Reload hinweg zu persistieren. Die zugehörige Schreibberechtigung überlebt einen
+  // Reload aber nicht zuverlässig (verifyPermission-Pattern), daher der Permission-Check bei
+  // jedem Laden und vor jedem Schreibversuch.
+
+  const fileSystemAccessSupported = typeof window.showSaveFilePicker === "function";
+
+  let autoBackupHandle = null;
+  let autoBackupStatus = "unset"; // "unset" | "active" | "needs-permission"
+
+  function openAutoBackupDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(AUTO_BACKUP_DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(AUTO_BACKUP_DB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function idbGetAutoBackupHandle() {
+    const db = await openAutoBackupDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUTO_BACKUP_DB_STORE, "readonly");
+      const req = tx.objectStore(AUTO_BACKUP_DB_STORE).get(AUTO_BACKUP_HANDLE_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function idbSetAutoBackupHandle(handle) {
+    const db = await openAutoBackupDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AUTO_BACKUP_DB_STORE, "readwrite");
+      tx.objectStore(AUTO_BACKUP_DB_STORE).put(handle, AUTO_BACKUP_HANDLE_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // requestIfNeeded=true löst ggf. den Berechtigungsdialog aus — funktioniert zuverlässig nur
+  // innerhalb eines echten Nutzer-Gestus (Klick, change-Event). Beim stillen Check auf
+  // queryPermission() (requestIfNeeded=false) gibt es nie einen Dialog.
+  async function verifyAutoBackupPermission(requestIfNeeded) {
+    if (!autoBackupHandle) return false;
+    const opts = { mode: "readwrite" };
+    try {
+      if ((await autoBackupHandle.queryPermission(opts)) === "granted") return true;
+      if (!requestIfNeeded) return false;
+      return (await autoBackupHandle.requestPermission(opts)) === "granted";
+    } catch (err) {
+      console.log("[AutoBackup] Berechtigungsprüfung fehlgeschlagen:", err);
+      return false;
+    }
+  }
+
+  function buildBackupJson() {
+    return JSON.stringify({
+      version: 1,
+      savedAt: new Date().toISOString(),
+      learnedCategories: learnedCategories,
+      tags: savedTags
+    }, null, 2);
+  }
+
+  async function writeAutoBackupFile() {
+    if (!autoBackupHandle) return;
+    const ok = await verifyAutoBackupPermission(true);
+    if (!ok) {
+      autoBackupStatus = "needs-permission";
+      renderAutoBackupSection();
+      return;
+    }
+    try {
+      const writable = await autoBackupHandle.createWritable();
+      await writable.write(buildBackupJson());
+      await writable.close();
+      autoBackupStatus = "active";
+      localStorage.setItem(AUTO_BACKUP_LAST_SAVED_STORAGE, new Date().toISOString());
+    } catch (err) {
+      console.log("[AutoBackup] Schreiben fehlgeschlagen:", err);
+    }
+    renderAutoBackupSection();
+  }
+
+  // Wird von rememberCategory()/rememberTag() nach jeder Änderung aufgerufen — no-op, solange
+  // keine automatische Sicherung eingerichtet ist.
+  function scheduleAutoBackupWrite() {
+    if (!autoBackupHandle) return;
+    writeAutoBackupFile();
+  }
+
+  async function initAutoBackup() {
+    if (!fileSystemAccessSupported) {
+      renderAutoBackupSection();
+      return;
+    }
+    try {
+      const handle = await idbGetAutoBackupHandle();
+      if (handle) {
+        autoBackupHandle = handle;
+        const granted = await verifyAutoBackupPermission(true);
+        autoBackupStatus = granted ? "active" : "needs-permission";
+      }
+    } catch (err) {
+      console.log("[AutoBackup] Laden des gespeicherten Datei-Handles fehlgeschlagen:", err);
+    }
+    renderAutoBackupSection();
+  }
+
+  async function setupAutoBackup() {
+    if (!fileSystemAccessSupported) return;
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: "budget-tracker-backup.json",
+        types: [{ description: "JSON-Datei", accept: { "application/json": [".json"] } }]
+      });
+      autoBackupHandle = handle;
+      await idbSetAutoBackupHandle(handle);
+      await writeAutoBackupFile();
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // Dialog abgebrochen
+      console.log("[AutoBackup] Einrichtung fehlgeschlagen:", err);
+    }
+  }
+
+  async function reconnectAutoBackup() {
+    const ok = await verifyAutoBackupPermission(true);
+    autoBackupStatus = ok ? "active" : "needs-permission";
+    if (ok) {
+      await writeAutoBackupFile();
+    } else {
+      renderAutoBackupSection();
+    }
+  }
+
+  function formatBackupTimestamp(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "unbekannt";
+    return d.toLocaleString("de-CH");
+  }
+
+  function formatAutoBackupStatusText() {
+    if (!fileSystemAccessSupported) return "Nicht verfügbar in diesem Browser.";
+    if (autoBackupStatus === "unset") return "Nicht eingerichtet.";
+    const lastSavedRaw = localStorage.getItem(AUTO_BACKUP_LAST_SAVED_STORAGE);
+    const lastSavedText = lastSavedRaw ? formatBackupTimestamp(lastSavedRaw) : "noch nie";
+    if (autoBackupStatus === "needs-permission") {
+      return "Eingerichtet, aber Berechtigung abgelaufen — bitte erneut erteilen (zuletzt gespeichert: " + lastSavedText + ").";
+    }
+    return "Aktiv, zuletzt gespeichert: " + lastSavedText;
+  }
+
+  function renderAutoBackupSection() {
+    autoBackupStatusLine.textContent = formatAutoBackupStatusText();
+
+    if (!fileSystemAccessSupported) {
+      autoBackupSetupBtn.style.display = "none";
+      autoBackupUnsupportedHint.style.display = "block";
+      return;
+    }
+    autoBackupUnsupportedHint.style.display = "none";
+    autoBackupSetupBtn.style.display = "inline-block";
+    if (autoBackupStatus === "unset") {
+      autoBackupSetupBtn.textContent = "Automatische Sicherung einrichten";
+    } else if (autoBackupStatus === "needs-permission") {
+      autoBackupSetupBtn.textContent = "Berechtigung erneut erteilen";
+    } else {
+      autoBackupSetupBtn.textContent = "Speicherort ändern";
+    }
+  }
+
+  autoBackupSetupBtn.addEventListener("click", () => {
+    if (autoBackupStatus === "needs-permission") reconnectAutoBackup();
+    else setupAutoBackup();
+  });
+
+  manualBackupDownloadBtn.addEventListener("click", () => {
+    const blob = new Blob([buildBackupJson()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "budget-tracker-backup.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  restoreBackupBtn.addEventListener("click", () => restoreBackupInput.click());
+  restoreBackupInput.addEventListener("change", () => {
+    const file = restoreBackupInput.files && restoreBackupInput.files[0];
+    restoreBackupInput.value = "";
+    if (file) handleRestoreFile(file);
+  });
+
+  async function handleRestoreFile(file) {
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (err) {
+      alert("Datei konnte nicht gelesen werden: ungültiges JSON.");
+      return;
+    }
+    const restoredCategories = (data && typeof data.learnedCategories === "object" && data.learnedCategories) || {};
+    const restoredTags = (data && typeof data.tags === "object" && data.tags) || {};
+
+    const replace = confirm(
+      "Sicherung wiederherstellen:\n\n" +
+      "OK = bestehende gelernte Zuordnungen & Tags ERSETZEN.\n" +
+      "Abbrechen = mit bestehenden Daten ZUSAMMENFÜHREN (Sicherung hat bei Konflikten Vorrang)."
+    );
+
+    if (replace) {
+      learnedCategories = restoredCategories;
+      savedTags = restoredTags;
+    } else {
+      learnedCategories = Object.assign({}, learnedCategories, restoredCategories);
+      savedTags = Object.assign({}, savedTags, restoredTags);
+    }
+    saveLearnedCategories();
+    saveTags();
+    renderLearnedCategoriesList();
+    renderGenericTagCleanupSection();
+    alert("Sicherung wiederhergestellt: " + Object.keys(restoredCategories).length +
+      " Kategorie-Zuordnung(en), " + Object.keys(restoredTags).length + " Tag(s).");
+  }
 
   function buildMappingTestLine(label, value) {
     const div = document.createElement("div");
@@ -2058,6 +2315,7 @@
   tagFilterSelect.addEventListener("change", renderCategoryTable);
 
   runNormalizeMerchantKeyConsistencyTests();
+  initAutoBackup();
 })();
 </script>
 
